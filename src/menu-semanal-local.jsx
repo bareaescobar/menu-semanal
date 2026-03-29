@@ -276,9 +276,9 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
         className="postit-filled"
         style={{
           background: 'white',
-          border: `1px solid ${hover && !isFuera ? '#d1d5db' : '#ebebeb'}`,
-          borderLeft: `3px solid ${isFuera ? '#d1d5db' : s.accent}`,
-          boxShadow: hover && !isFuera ? '0 4px 16px rgba(0,0,0,0.08)' : 'none',
+          border: 'none',
+          borderLeft: `4px solid ${isFuera ? '#e0e0e0' : s.accent}`,
+          boxShadow: hover && !isFuera ? '0 6px 20px rgba(0,0,0,0.10)' : '0 2px 10px rgba(0,0,0,0.05)',
           transform: hover && !isFuera ? 'translateY(-2px)' : 'none',
           cursor: isFuera ? 'default' : 'pointer',
         }}>
@@ -304,9 +304,10 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
       onMouseEnter={() => setBtnHover(true)} onMouseLeave={() => setBtnHover(false)}
       className="postit-empty"
       style={{
-        border: `1px dashed ${btnHover ? '#c4c4c4' : '#e0e0e0'}`,
+        border: `1.5px dashed ${btnHover ? '#d0d0d0' : '#e8e8e8'}`,
         background: btnHover ? '#fafafa' : 'white',
-        color: btnHover ? '#6b7280' : '#c4c4c4',
+        color: btnHover ? '#9ca3af' : '#d0d0d0',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
       }}>
       <span className="postit-empty-emoji" style={{ opacity: btnHover ? 0.8 : 0.4 }}>{slot.emoji}</span>
       <Plus size={14} strokeWidth={2} />
@@ -347,8 +348,9 @@ function RecipeCard({ recipe, onSelect, onToggleFav, onViewRecipe, freq }) {
   const isFuera = recipe.id === '__fuera__';
   return (
     <div onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ background:'white', border:`1px solid ${h ? '#c8c8c8' : '#ebebeb'}`, borderRadius:10, padding:12,
-        boxShadow: h ? '0 4px 12px rgba(0,0,0,0.07)' : 'none', transition:'all 0.15s' }}>
+      style={{ background:'white', border:'none', borderRadius:16, padding:14,
+        boxShadow: h ? '0 6px 20px rgba(0,0,0,0.09)' : '0 2px 10px rgba(0,0,0,0.05)', transition:'all 0.18s',
+        transform: h ? 'translateY(-2px)' : 'none' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
         <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
           {recipe.isNew && <span style={{ fontSize:'0.58rem', background:'#d1fae5', color:'#065f46', padding:'2px 6px', borderRadius:99, fontWeight:700 }}>✨ NUEVO</span>}
@@ -387,15 +389,15 @@ function RecipeCard({ recipe, onSelect, onToggleFav, onViewRecipe, freq }) {
       <div style={{ display:'flex', gap:6 }}>
         {!isFuera && (
           <button onClick={onViewRecipe}
-            style={{ flex:1, padding:'6px 0', fontSize:11, borderRadius:6, border:'1px solid #ebebeb',
-              background:'white', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4, color:'#888888', fontWeight:500 }}>
+            style={{ flex:1, padding:'7px 0', fontSize:11, borderRadius:999, border:'1.5px solid #f0f0f0',
+              background:'white', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4, color:'#888888', fontWeight:600 }}>
             <BookOpen size={11} /> Receta
           </button>
         )}
         <button onClick={onSelect}
-          style={{ flex:1, padding:'6px 0', fontSize:11, borderRadius:6, border:'none',
-            background: isFuera ? '#888888' : '#f59e0b',
-            cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4, color:'white', fontWeight:600 }}>
+          style={{ flex:1, padding:'7px 0', fontSize:11, borderRadius:999, border:'none',
+            background: isFuera ? '#aaaaaa' : '#f59e0b',
+            cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4, color:'white', fontWeight:700 }}>
           <Plus size={11} /> Añadir
         </button>
       </div>
@@ -1081,6 +1083,11 @@ export default function App() {
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
   const [dbSyncing, setDbSyncing]       = useState(true);
+  const [selectedDay, setSelectedDay]   = useState(() => {
+    const jsDay = new Date().getDay();
+    const idx = jsDay === 0 ? 6 : jsDay - 1; // Sun→6, Mon→0
+    return DAYS[idx];
+  });
 
   // ── Carga inicial desde Supabase ──────────────────────────────
   useEffect(() => {
@@ -1208,7 +1215,7 @@ export default function App() {
   ];
 
   return (
-    <div style={{ minHeight:'100vh', background:'#f5f5f5', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif' }}>
+    <div style={{ minHeight:'100vh', background:'#f2f2f7', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif' }}>
 
       {/* HEADER */}
       <div className="app-header">
@@ -1285,18 +1292,64 @@ export default function App() {
 
           {/* PIZARRA */}
           <div className={`board-area ${mobileTab === 'shop' ? 'hidden-mobile' : ''}`}>
-            <div style={{ overflowX:'auto', paddingBottom:8, WebkitOverflowScrolling:'touch' }}>
-              <div style={{ display:'flex', gap:10, minWidth:'max-content' }}>
-                {DAYS.map((day, di) => (
-                  <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
-                    menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
-                    recipes={recipes}
-                    onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
-                    onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
-                    onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+
+            {/* ── MÓVIL: selector de días + vista de un día ── */}
+            <div className="mobile-board">
+              {/* Pills de días */}
+              <div className="day-pills-row">
+                {DAYS.map((day, di) => {
+                  const filled = SLOTS.filter(({key}) => menu[day]?.[key]).length;
+                  const isToday = di === (new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
+                  return (
+                    <button key={day} className={`day-pill ${selectedDay === day ? 'active' : ''} ${isToday ? 'today' : ''}`}
+                      onClick={() => setSelectedDay(day)}>
+                      <span className="day-pill-short">{DAYS_SHORT[di]}</span>
+                      <span className={`day-pill-dot ${filled === 3 ? 'full' : filled > 0 ? 'partial' : 'empty'}`} />
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Nombre del día seleccionado */}
+              <div className="selected-day-header">
+                <span className="selected-day-name">{selectedDay}</span>
+                <span className="selected-day-count">
+                  {SLOTS.filter(({key}) => menu[selectedDay]?.[key]).length}/{SLOTS.length} platos
+                </span>
+              </div>
+              {/* Slots del día seleccionado en formato grande */}
+              <div className="mobile-slots">
+                {SLOTS.map(({ key, label, emoji }) => (
+                  <div key={key} className="mobile-slot-row">
+                    <div className="mobile-slot-label">
+                      <span className="mobile-slot-emoji">{emoji}</span>
+                      <span className="mobile-slot-text">{label}</span>
+                    </div>
+                    <PostItSlot slotKey={key}
+                      menuVal={menu[selectedDay]?.[key]} recipes={recipes}
+                      onSlotClick={() => { setDrawerFilter('all'); setActiveSlot({ day:selectedDay, slotKey:key }); }}
+                      onRemove={() => setMenu(p => ({ ...p, [selectedDay]:{ ...p[selectedDay], [key]:null } }))}
+                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                  </div>
                 ))}
               </div>
             </div>
+
+            {/* ── DESKTOP: todos los días en scroll horizontal ── */}
+            <div className="desktop-board">
+              <div style={{ overflowX:'auto', paddingBottom:8, WebkitOverflowScrolling:'touch' }}>
+                <div style={{ display:'flex', gap:10, minWidth:'max-content' }}>
+                  {DAYS.map((day, di) => (
+                    <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
+                      menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
+                      recipes={recipes}
+                      onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
+                      onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
+                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="board-hint">
               💡 Toca + para añadir · Pulsa el post-it para ver la receta
             </div>
@@ -1353,15 +1406,15 @@ export default function App() {
       )}
 
       <style>{`
-        /* ── ESTILO: MINIMALISTA PURO ───────────────── */
+        /* ── ESTILO PRINCIPAL ───────────────────────── */
         /* Reset */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #f5f5f5; }
+        body { background: #f2f2f7; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 4px; }
         input:focus, textarea:focus, select:focus {
           border-color: #f59e0b !important;
-          box-shadow: 0 0 0 3px rgba(245,158,11,0.12) !important;
+          box-shadow: 0 0 0 3px rgba(245,158,11,0.15) !important;
           outline: none;
         }
         button { font-family: inherit; }
@@ -1369,29 +1422,35 @@ export default function App() {
         /* ── Header ────────────────────────────────── */
         .app-header {
           background: #ffffff;
-          border-bottom: 1px solid #ebebeb;
+          border-bottom: none;
+          box-shadow: 0 1px 0 rgba(0,0,0,0.06), 0 2px 12px rgba(0,0,0,0.04);
           position: sticky; top: 0; z-index: 50;
         }
-        .header-inner { max-width: 1300px; margin: 0 auto; padding: 12px 20px; }
+        .header-inner { max-width: 1300px; margin: 0 auto; padding: 14px 20px; }
         .header-row1 { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
-        .header-brand { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
-        .header-logo { font-size: 20px; line-height: 1; flex-shrink: 0; }
-        .header-title { font-weight: 700; color: #111111; font-size: 15px; letter-spacing: -0.01em; }
-        .header-subtitle { font-size: 11px; color: #aaaaaa; margin-top: 1px; letter-spacing: 0.01em; }
+        .header-brand { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+        .header-logo {
+          font-size: 22px; line-height: 1; flex-shrink: 0;
+          background: #fff8e7; border-radius: 12px;
+          width: 40px; height: 40px;
+          display: flex; align-items: center; justify-content: center;
+          border: 1px solid #fde68a;
+        }
+        .header-title { font-weight: 800; color: #1c1c1e; font-size: 16px; letter-spacing: -0.02em; }
+        .header-subtitle { font-size: 11px; color: #aeaeb2; margin-top: 2px; font-weight: 500; }
         .header-row2 { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 
-        /* Desktop tabs — estilo minimalista con underline */
-        .desktop-tabs { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
+        /* Desktop tabs */
+        .desktop-tabs { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
         .desktop-tab-btn {
-          display: flex; align-items: center; gap: 5px;
-          padding: 6px 14px; border-radius: 0; border: none; cursor: pointer;
-          font-size: 12px; font-weight: 500; letter-spacing: 0.01em;
-          background: transparent; color: #aaaaaa;
-          transition: all 0.15s ease; position: relative;
-          border-bottom: 2px solid transparent;
+          display: flex; align-items: center; gap: 6px;
+          padding: 7px 16px; border-radius: 999px; border: none; cursor: pointer;
+          font-size: 12px; font-weight: 600;
+          background: transparent; color: #aeaeb2;
+          transition: all 0.18s ease; position: relative;
         }
-        .desktop-tab-btn:hover { color: #555555; border-bottom-color: #e0e0e0; }
-        .desktop-tab-btn.active { color: #111111; border-bottom-color: #f59e0b; font-weight: 600; }
+        .desktop-tab-btn:hover { background: #f2f2f7; color: #3a3a3c; }
+        .desktop-tab-btn.active { background: #fff3d0; color: #c07800; }
         .tab-badge {
           position: absolute; top: 2px; right: 4px;
           width: 15px; height: 15px; border-radius: 50%;
@@ -1400,22 +1459,23 @@ export default function App() {
           display: flex; align-items: center; justify-content: center;
         }
         .more-btn {
-          padding: 5px 10px; border-radius: 6px; font-size: 13px;
-          border: 1px solid #ebebeb; background: white; cursor: pointer; color: #aaaaaa;
-          transition: all 0.15s; margin-left: 6px;
+          padding: 6px 12px; border-radius: 999px; font-size: 13px;
+          border: 1.5px solid #e8e8e8; background: white; cursor: pointer; color: #aeaeb2;
+          transition: all 0.15s; margin-left: 4px; font-weight: 600;
         }
-        .more-btn:hover { background: #f5f5f5; }
+        .more-btn:hover { background: #f2f2f7; }
         .btn-new-recipe {
-          padding: 7px 16px; border-radius: 6px; font-size: 12px; font-weight: 600;
+          padding: 8px 18px; border-radius: 999px; font-size: 12px; font-weight: 700;
           border: none; background: #f59e0b; color: white; cursor: pointer;
           display: flex; align-items: center; gap: 6px;
-          transition: all 0.15s; letter-spacing: 0.01em;
+          transition: all 0.18s; letter-spacing: 0.01em;
+          box-shadow: 0 2px 8px rgba(245,158,11,0.30);
         }
-        .btn-new-recipe:hover { background: #d97706; }
+        .btn-new-recipe:hover { background: #d97706; box-shadow: 0 4px 12px rgba(245,158,11,0.40); }
         .btn-clear-week {
-          font-size: 11px; color: #ef4444; border: 1px solid #fecaca;
-          background: white; border-radius: 6px; padding: 5px 12px;
-          cursor: pointer; font-weight: 500; transition: all 0.15s;
+          font-size: 11px; color: #ef4444; border: 1.5px solid #fecaca;
+          background: white; border-radius: 999px; padding: 6px 14px;
+          cursor: pointer; font-weight: 600; transition: all 0.15s;
         }
         .btn-clear-week:hover { background: #fef2f2; }
 
@@ -1427,76 +1487,76 @@ export default function App() {
           padding-bottom: 80px;
         }
         .board-area { flex: 1; min-width: 0; }
-        .board-hint { font-size: 11px; color: #cccccc; margin-top: 10px; padding-left: 2px; }
+        .board-hint { font-size: 11px; color: #d0d0d0; margin-top: 12px; padding-left: 2px; }
         .shopping-sidebar {
-          width: 280px; flex-shrink: 0;
+          width: 290px; flex-shrink: 0;
           position: sticky; top: 90px;
         }
 
         /* ── DayColumn ─────────────────────────────── */
-        .day-column { width: 158px; flex-shrink: 0; }
+        .day-column { width: 162px; flex-shrink: 0; }
         .day-header {
           text-align: center; margin-bottom: 12px;
-          padding-bottom: 10px; border-bottom: 1px solid #ebebeb;
+          padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;
         }
         .day-short-row {
           display: flex; align-items: center; justify-content: center;
           gap: 6px; margin-bottom: 3px;
         }
         .day-short {
-          font-size: 10px; font-weight: 700; color: #cccccc;
+          font-size: 10px; font-weight: 800; color: #c7c7cc;
           letter-spacing: 0.12em; text-transform: uppercase;
         }
-        .day-name { font-size: 13px; font-weight: 600; color: #111111; letter-spacing: -0.01em; }
+        .day-name { font-size: 13px; font-weight: 700; color: #1c1c1e; letter-spacing: -0.01em; }
         .day-count {
-          font-size: 9px; font-weight: 700; color: #f59e0b;
-          background: #fffbeb; padding: 1px 6px; border-radius: 99px;
-          border: 1px solid #fde68a; line-height: 1.4;
+          font-size: 9px; font-weight: 700; color: #c07800;
+          background: #fff3d0; padding: 2px 7px; border-radius: 99px;
+          line-height: 1.4;
         }
 
         /* ── PostIt ────────────────────────────────── */
-        .postit-filled, .postit-empty { height: 108px; }
+        .postit-filled, .postit-empty { height: 112px; }
 
         .postit-filled {
-          border-radius: 8px; padding: 10px 10px 8px 12px;
+          border-radius: 16px; padding: 10px 10px 8px 13px;
           position: relative; overflow: hidden;
-          transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+          transition: box-shadow 0.18s ease, transform 0.18s ease;
           display: flex; flex-direction: column;
         }
         .postit-filled:hover .postit-remove-btn { opacity: 1 !important; }
         .postit-remove-btn {
-          position: absolute; top: 5px; right: 5px;
-          width: 18px; height: 18px; border-radius: 4px;
-          background: white; border: 1px solid #ebebeb; cursor: pointer;
+          position: absolute; top: 6px; right: 6px;
+          width: 20px; height: 20px; border-radius: 999px;
+          background: rgba(255,255,255,0.9); border: 1px solid #e8e8e8; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
           color: #999999; transition: all 0.15s; flex-shrink: 0;
+          backdrop-filter: blur(4px);
         }
-        .postit-remove-btn:hover { color: #ef4444; border-color: #fecaca; }
-        .postit-emoji { font-size: 13px; margin-bottom: 4px; line-height: 1; flex-shrink: 0; }
+        .postit-remove-btn:hover { color: #ef4444; border-color: #fecaca; background: white; }
+        .postit-emoji { font-size: 14px; margin-bottom: 4px; line-height: 1; flex-shrink: 0; }
         .postit-name {
-          font-weight: 600; font-size: 11.5px; line-height: 1.3; margin-bottom: 4px;
-          color: #111111; letter-spacing: -0.01em;
+          font-weight: 700; font-size: 11.5px; line-height: 1.3; margin-bottom: 4px;
+          color: #1c1c1e; letter-spacing: -0.01em;
           overflow: hidden;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
           flex-shrink: 0;
         }
         .postit-meta {
           display: flex; align-items: center; gap: 3px;
-          color: #bbbbbb; font-size: 10px; flex-shrink: 0;
+          color: #c7c7cc; font-size: 10px; flex-shrink: 0;
         }
         .postit-tag {
-          margin-top: auto; font-size: 10px;
-          display: inline-block; font-weight: 500;
+          margin-top: auto; font-size: 9.5px;
+          display: inline-block; font-weight: 600;
           align-self: flex-start; letter-spacing: 0.01em;
         }
         .postit-empty {
-          width: 100%; border-radius: 8px;
+          width: 100%; border-radius: 16px;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
-          gap: 4px; cursor: pointer; transition: all 0.15s ease;
+          gap: 5px; cursor: pointer; transition: all 0.18s ease;
         }
-        .postit-empty:hover { }
-        .postit-empty-emoji { font-size: 14px; line-height: 1; }
-        .postit-empty-label { font-size: 10px; font-weight: 500; letter-spacing: 0.02em; }
+        .postit-empty-emoji { font-size: 15px; line-height: 1; opacity: 0.5; }
+        .postit-empty-label { font-size: 10px; font-weight: 600; letter-spacing: 0.03em; }
 
         /* ── History ───────────────────────────────── */
         .history-grid {
@@ -1505,6 +1565,10 @@ export default function App() {
           gap: 16px;
           align-items: start;
         }
+
+        /* ── Mobile board: hidden on desktop ──────── */
+        .mobile-board { display: none; }
+        .desktop-board { display: block; }
 
         /* ── Bottom Nav (mobile only) ──────────────── */
         .bottom-nav { display: none; }
@@ -1518,31 +1582,38 @@ export default function App() {
           .bottom-nav {
             display: flex;
             position: fixed; bottom: 0; left: 0; right: 0;
-            background: white;
-            border-top: 1px solid #f0f0f0;
-            box-shadow: 0 -2px 12px rgba(0,0,0,0.07);
-            padding: 6px 0;
-            padding-bottom: calc(6px + env(safe-area-inset-bottom));
+            background: rgba(255,255,255,0.95);
+            border-top: 1px solid rgba(0,0,0,0.06);
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+            padding: 8px 8px;
+            padding-bottom: calc(8px + env(safe-area-inset-bottom));
             z-index: 100;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
           }
           .bottom-nav-btn {
             flex: 1; display: flex; flex-direction: column;
-            align-items: center; gap: 2px;
+            align-items: center; gap: 3px;
             background: none; border: none; cursor: pointer;
-            padding: 4px 0; position: relative;
-            color: #9ca3af; font-size: 10px; font-weight: 600;
-            transition: color 0.15s;
+            padding: 6px 4px; position: relative;
+            color: #c7c7cc; font-weight: 600;
+            transition: all 0.18s;
+            border-radius: 14px;
           }
-          .bottom-nav-btn.active { color: #f59e0b; }
-          .bottom-nav-btn.active .bottom-nav-icon { transform: scale(1.15); }
-          .bottom-nav-icon { font-size: 18px; line-height: 1; transition: transform 0.15s; }
-          .bottom-nav-label { font-size: 10px; }
+          .bottom-nav-btn.active {
+            color: #f59e0b;
+            background: #fff8e7;
+          }
+          .bottom-nav-icon { font-size: 20px; line-height: 1; transition: transform 0.18s; }
+          .bottom-nav-btn.active .bottom-nav-icon { transform: scale(1.1); }
+          .bottom-nav-label { font-size: 10px; font-weight: 700; letter-spacing: 0.01em; }
           .bottom-nav-badge {
-            position: absolute; top: 0; right: calc(50% - 18px);
-            width: 16px; height: 16px; border-radius: 50%;
+            position: absolute; top: 3px; right: calc(50% - 20px);
+            width: 17px; height: 17px; border-radius: 50%;
             background: #ef4444; color: white;
             font-size: 9px; font-weight: 700;
             display: flex; align-items: center; justify-content: center;
+            border: 2px solid white;
           }
 
           /* Stack history on mobile */
@@ -1566,18 +1637,84 @@ export default function App() {
           /* Make board hint shorter on mobile */
           .board-hint { font-size: 10px; }
 
-          /* PostIt mismo tamaño en móvil */
-          .postit-filled, .postit-empty { height: 112px; }
           /* Always show remove button on mobile (no hover) */
-          .postit-remove-btn { opacity: 0.7 !important; }
+          .postit-remove-btn { opacity: 1 !important; }
+
+          /* ── Mobile board layout ─────────────────── */
+          .mobile-board  { display: block; }
+          .desktop-board { display: none; }
+
+          /* Day pills row */
+          .day-pills-row {
+            display: flex; gap: 6px;
+            overflow-x: auto; padding-bottom: 4px; margin-bottom: 14px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+          }
+          .day-pills-row::-webkit-scrollbar { display: none; }
+          .day-pill {
+            flex-shrink: 0; display: flex; flex-direction: column;
+            align-items: center; gap: 5px;
+            padding: 8px 12px; border-radius: 14px;
+            border: 1.5px solid #e8e8e8; background: white;
+            cursor: pointer; transition: all 0.18s; min-width: 52px;
+          }
+          .day-pill.today { border-color: #fde68a; }
+          .day-pill.active { background: #f59e0b; border-color: #f59e0b; }
+          .day-pill-short {
+            font-size: 10px; font-weight: 800; letter-spacing: 0.1em;
+            color: #bbbbbb; text-transform: uppercase;
+          }
+          .day-pill.today .day-pill-short { color: #d97706; }
+          .day-pill.active .day-pill-short { color: white; }
+          .day-pill-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #e8e8e8; transition: background 0.18s;
+          }
+          .day-pill-dot.partial { background: #fcd34d; }
+          .day-pill-dot.full    { background: #10b981; }
+          .day-pill.active .day-pill-dot { background: rgba(255,255,255,0.5); }
+          .day-pill.active .day-pill-dot.full { background: rgba(255,255,255,0.95); }
+
+          /* Selected day header */
+          .selected-day-header {
+            display: flex; align-items: baseline; gap: 8px;
+            margin-bottom: 12px; padding: 0 2px;
+          }
+          .selected-day-name {
+            font-size: 20px; font-weight: 700; color: #111111; letter-spacing: -0.02em;
+          }
+          .selected-day-count {
+            font-size: 11px; color: #aaaaaa; font-weight: 500;
+          }
+
+          /* Slot rows with labels */
+          .mobile-slots { display: flex; flex-direction: column; gap: 10px; }
+          .mobile-slot-row { display: flex; flex-direction: column; gap: 4px; }
+          .mobile-slot-label {
+            display: flex; align-items: center; gap: 5px; padding-left: 2px;
+          }
+          .mobile-slot-emoji { font-size: 13px; }
+          .mobile-slot-text {
+            font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; color: #aaaaaa;
+          }
+
+          /* Taller, more spacious slot cards on mobile */
+          .mobile-slot-row .postit-filled,
+          .mobile-slot-row .postit-empty {
+            height: 96px; border-radius: 18px;
+          }
+          .mobile-slot-row .postit-filled { padding: 13px 13px 10px 16px; }
+          .mobile-slot-row .postit-name { font-size: 13.5px; }
         }
 
         @media (min-width: 768px) {
-          /* Shopping sidebar always visible on desktop */
           #sidebar-shopping { display: block !important; }
           .hidden-mobile { display: block; }
           .tab-content { padding-bottom: 16px; }
           .main-layout { padding-bottom: 24px; }
+          body { background: #f2f2f7; }
         }
       `}</style>
     </div>

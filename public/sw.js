@@ -1,5 +1,6 @@
-const CACHE = 'menu-semanal-v1';
-const ASSETS = ['/', '/index.html'];
+const CACHE = 'menu-semanal-v2';
+const BASE = self.location.pathname.replace('/sw.js', '');
+const ASSETS = [BASE + '/', BASE + '/index.html'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

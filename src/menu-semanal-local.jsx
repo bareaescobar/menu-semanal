@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Star, ShoppingCart, X, Clock, Plus, Check, BookOpen, Pencil, Trash2, Save, Calendar, ChevronLeft, ChevronRight, Coffee, Share2, Copy, MessageCircle, Download } from "lucide-react";
+import { dbLoad, dbSave } from "./supabase";
 
 const DAYS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const DAYS_SHORT = ['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'];
@@ -1079,6 +1080,34 @@ export default function App() {
   const [mobileTab, setMobileTab]       = useState('board');
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
+  const [dbSyncing, setDbSyncing]       = useState(true);
+  const initialized = useRef(false);
+
+  // ── Carga inicial desde Supabase ──────────────────────────────
+  useEffect(() => {
+    Promise.all([
+      dbLoad('recipes'),
+      dbLoad('history'),
+      dbLoad('checked'),
+    ]).then(([dbRecipes, dbHistory, dbChecked]) => {
+      if (dbRecipes) {
+        const migrated = migrateRecipes(dbRecipes);
+        setRecipes(migrated);
+        saveLS(SKEY+'_recipes', migrated);
+      }
+      if (dbHistory) {
+        setHistory(dbHistory);
+        saveLS(SKEY+'_history', dbHistory);
+      }
+      if (dbChecked) {
+        setChecked(new Set(dbChecked));
+        saveLS(SKEY+'_checked', dbChecked);
+      }
+    }).catch(() => {}).finally(() => {
+      initialized.current = true;
+      setDbSyncing(false);
+    });
+  }, []);
 
   const menu = history[weekKey] || emptyMenu();
   const setMenu = useCallback((updater) => {
@@ -1091,8 +1120,22 @@ export default function App() {
     });
   }, [weekKey]);
 
-  useEffect(() => { saveLS(SKEY+'_recipes', recipes); }, [recipes]);
-  useEffect(() => { saveLS(SKEY+'_checked', [...checked]); }, [checked]);
+  useEffect(() => {
+    if (!initialized.current) return;
+    saveLS(SKEY+'_recipes', recipes);
+    dbSave('recipes', recipes);
+  }, [recipes]);
+
+  useEffect(() => {
+    if (!initialized.current) return;
+    saveLS(SKEY+'_checked', [...checked]);
+    dbSave('checked', [...checked]);
+  }, [checked]);
+
+  useEffect(() => {
+    if (!initialized.current) return;
+    dbSave('history', history);
+  }, [history]);
 
   useEffect(() => {
     if (recipeModal) {
@@ -1152,6 +1195,7 @@ export default function App() {
       return next;
     });
     setRecipeEditor(null);
+    // dbSave for history triggered by the useEffect above
   };
 
   const TABS = [
@@ -1173,7 +1217,11 @@ export default function App() {
               <span className="header-logo">🥘</span>
               <div>
                 <div className="header-title">Menú Semanal</div>
-                <div className="header-subtitle">{totalPlatos}/{DAYS.length * 3} platos planificados</div>
+                <div className="header-subtitle">
+                  {dbSyncing
+                    ? '⏳ Sincronizando…'
+                    : `${totalPlatos}/${DAYS.length * 3} platos planificados`}
+                </div>
               </div>
             </div>
             {/* Tabs — solo visibles en desktop */}

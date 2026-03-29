@@ -1081,6 +1081,11 @@ export default function App() {
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
   const [dbSyncing, setDbSyncing]       = useState(true);
+  const [selectedDay, setSelectedDay]   = useState(() => {
+    const jsDay = new Date().getDay();
+    const idx = jsDay === 0 ? 6 : jsDay - 1; // Sun→6, Mon→0
+    return DAYS[idx];
+  });
 
   // ── Carga inicial desde Supabase ──────────────────────────────
   useEffect(() => {
@@ -1285,18 +1290,64 @@ export default function App() {
 
           {/* PIZARRA */}
           <div className={`board-area ${mobileTab === 'shop' ? 'hidden-mobile' : ''}`}>
-            <div style={{ overflowX:'auto', paddingBottom:8, WebkitOverflowScrolling:'touch' }}>
-              <div style={{ display:'flex', gap:10, minWidth:'max-content' }}>
-                {DAYS.map((day, di) => (
-                  <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
-                    menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
-                    recipes={recipes}
-                    onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
-                    onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
-                    onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+
+            {/* ── MÓVIL: selector de días + vista de un día ── */}
+            <div className="mobile-board">
+              {/* Pills de días */}
+              <div className="day-pills-row">
+                {DAYS.map((day, di) => {
+                  const filled = SLOTS.filter(({key}) => menu[day]?.[key]).length;
+                  const isToday = di === (new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
+                  return (
+                    <button key={day} className={`day-pill ${selectedDay === day ? 'active' : ''} ${isToday ? 'today' : ''}`}
+                      onClick={() => setSelectedDay(day)}>
+                      <span className="day-pill-short">{DAYS_SHORT[di]}</span>
+                      <span className={`day-pill-dot ${filled === 3 ? 'full' : filled > 0 ? 'partial' : 'empty'}`} />
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Nombre del día seleccionado */}
+              <div className="selected-day-header">
+                <span className="selected-day-name">{selectedDay}</span>
+                <span className="selected-day-count">
+                  {SLOTS.filter(({key}) => menu[selectedDay]?.[key]).length}/{SLOTS.length} platos
+                </span>
+              </div>
+              {/* Slots del día seleccionado en formato grande */}
+              <div className="mobile-slots">
+                {SLOTS.map(({ key, label, emoji }) => (
+                  <div key={key} className="mobile-slot-row">
+                    <div className="mobile-slot-label">
+                      <span className="mobile-slot-emoji">{emoji}</span>
+                      <span className="mobile-slot-text">{label}</span>
+                    </div>
+                    <PostItSlot slotKey={key}
+                      menuVal={menu[selectedDay]?.[key]} recipes={recipes}
+                      onSlotClick={() => { setDrawerFilter('all'); setActiveSlot({ day:selectedDay, slotKey:key }); }}
+                      onRemove={() => setMenu(p => ({ ...p, [selectedDay]:{ ...p[selectedDay], [key]:null } }))}
+                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                  </div>
                 ))}
               </div>
             </div>
+
+            {/* ── DESKTOP: todos los días en scroll horizontal ── */}
+            <div className="desktop-board">
+              <div style={{ overflowX:'auto', paddingBottom:8, WebkitOverflowScrolling:'touch' }}>
+                <div style={{ display:'flex', gap:10, minWidth:'max-content' }}>
+                  {DAYS.map((day, di) => (
+                    <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
+                      menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
+                      recipes={recipes}
+                      onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
+                      onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
+                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="board-hint">
               💡 Toca + para añadir · Pulsa el post-it para ver la receta
             </div>
@@ -1506,6 +1557,10 @@ export default function App() {
           align-items: start;
         }
 
+        /* ── Mobile board: hidden on desktop ──────── */
+        .mobile-board { display: none; }
+        .desktop-board { display: block; }
+
         /* ── Bottom Nav (mobile only) ──────────────── */
         .bottom-nav { display: none; }
 
@@ -1570,6 +1625,75 @@ export default function App() {
           .postit-filled, .postit-empty { height: 112px; }
           /* Always show remove button on mobile (no hover) */
           .postit-remove-btn { opacity: 0.7 !important; }
+
+          /* ── Mobile board layout ─────────────────── */
+          .mobile-board  { display: block; }
+          .desktop-board { display: none; }
+
+          /* Day pills row */
+          .day-pills-row {
+            display: flex; gap: 6px;
+            overflow-x: auto; padding-bottom: 4px; margin-bottom: 14px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+          }
+          .day-pills-row::-webkit-scrollbar { display: none; }
+          .day-pill {
+            flex-shrink: 0; display: flex; flex-direction: column;
+            align-items: center; gap: 5px;
+            padding: 8px 12px; border-radius: 14px;
+            border: 1.5px solid #e8e8e8; background: white;
+            cursor: pointer; transition: all 0.18s; min-width: 52px;
+          }
+          .day-pill.today { border-color: #fde68a; }
+          .day-pill.active { background: #f59e0b; border-color: #f59e0b; }
+          .day-pill-short {
+            font-size: 10px; font-weight: 800; letter-spacing: 0.1em;
+            color: #bbbbbb; text-transform: uppercase;
+          }
+          .day-pill.today .day-pill-short { color: #d97706; }
+          .day-pill.active .day-pill-short { color: white; }
+          .day-pill-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #e8e8e8; transition: background 0.18s;
+          }
+          .day-pill-dot.partial { background: #fcd34d; }
+          .day-pill-dot.full    { background: #10b981; }
+          .day-pill.active .day-pill-dot { background: rgba(255,255,255,0.5); }
+          .day-pill.active .day-pill-dot.full { background: rgba(255,255,255,0.95); }
+
+          /* Selected day header */
+          .selected-day-header {
+            display: flex; align-items: baseline; gap: 8px;
+            margin-bottom: 12px; padding: 0 2px;
+          }
+          .selected-day-name {
+            font-size: 20px; font-weight: 700; color: #111111; letter-spacing: -0.02em;
+          }
+          .selected-day-count {
+            font-size: 11px; color: #aaaaaa; font-weight: 500;
+          }
+
+          /* Slot rows with labels */
+          .mobile-slots { display: flex; flex-direction: column; gap: 10px; }
+          .mobile-slot-row { display: flex; flex-direction: column; gap: 4px; }
+          .mobile-slot-label {
+            display: flex; align-items: center; gap: 5px; padding-left: 2px;
+          }
+          .mobile-slot-emoji { font-size: 13px; }
+          .mobile-slot-text {
+            font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; color: #aaaaaa;
+          }
+
+          /* Taller, more spacious slot cards on mobile */
+          .mobile-slot-row .postit-filled,
+          .mobile-slot-row .postit-empty {
+            height: 90px; border-radius: 14px;
+          }
+          .mobile-slot-row .postit-filled { padding: 12px 12px 8px 14px; }
+          .mobile-slot-row .postit-name { font-size: 13px; -webkit-line-clamp: 2; }
+          .mobile-slot-row .postit-remove-btn { opacity: 1 !important; }
         }
 
         @media (min-width: 768px) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Star, ShoppingCart, X, Clock, Plus, Check, BookOpen, Pencil, Trash2, Save, Calendar, ChevronLeft, ChevronRight, Coffee, Share2, Copy, MessageCircle, Download } from "lucide-react";
 import { dbLoad, dbSave } from "./supabase";
 
@@ -1081,7 +1081,6 @@ export default function App() {
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
   const [dbSyncing, setDbSyncing]       = useState(true);
-  const initialized = useRef(false);
 
   // ── Carga inicial desde Supabase ──────────────────────────────
   useEffect(() => {
@@ -1094,17 +1093,23 @@ export default function App() {
         const migrated = migrateRecipes(dbRecipes);
         setRecipes(migrated);
         saveLS(SKEY+'_recipes', migrated);
+      } else {
+        // Supabase vacío: migrar datos de localStorage a Supabase
+        setRecipes(prev => { dbSave('recipes', prev); return prev; });
       }
       if (dbHistory) {
         setHistory(dbHistory);
         saveLS(SKEY+'_history', dbHistory);
+      } else {
+        setHistory(prev => { dbSave('history', prev); return prev; });
       }
       if (dbChecked) {
         setChecked(new Set(dbChecked));
         saveLS(SKEY+'_checked', dbChecked);
+      } else {
+        setChecked(prev => { dbSave('checked', [...prev]); return prev; });
       }
     }).catch(() => {}).finally(() => {
-      initialized.current = true;
       setDbSyncing(false);
     });
   }, []);
@@ -1121,19 +1126,16 @@ export default function App() {
   }, [weekKey]);
 
   useEffect(() => {
-    if (!initialized.current) return;
     saveLS(SKEY+'_recipes', recipes);
     dbSave('recipes', recipes);
   }, [recipes]);
 
   useEffect(() => {
-    if (!initialized.current) return;
     saveLS(SKEY+'_checked', [...checked]);
     dbSave('checked', [...checked]);
   }, [checked]);
 
   useEffect(() => {
-    if (!initialized.current) return;
     dbSave('history', history);
   }, [history]);
 

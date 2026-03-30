@@ -1,8 +1,10 @@
 /**
- * Vercel serverless function: normalise recipe data using Claude Haiku.
+ * Vercel serverless function: normalise recipe data using Google Gemini (free tier).
  * POST /api/normalize-recipe
  * Body: { name, ingredients: [{name, amount}], steps: [string] }
  * Returns: { ingredients: [{name, amount}], steps: [string] }
+ *
+ * Requires env var: GEMINI_API_KEY (free from https://aistudio.google.com)
  */
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,8 +12,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
 
   const { name = '', ingredients = [], steps = [] } = req.body || {};
 
@@ -31,36 +33,28 @@ INSTRUCCIONES:
 3. Condensa los pasos a máximo 5, en español, cada uno en 1-2 frases cortas y directas. Elimina redundancias.
 4. No añadas ingredientes ni pasos que no estén en el original.
 
-Responde SOLO con JSON válido, sin texto adicional, con este formato exacto:
-{
-  "ingredients": [{"amount": "...", "name": "..."}],
-  "steps": ["...", "..."]
-}`;
+Responde SOLO con JSON válido, sin texto adicional ni bloques de código, con este formato exacto:
+{"ingredients":[{"amount":"...","name":"..."}],"steps":["...","..."]}`;
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }],
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
       }),
     });
 
     if (!response.ok) {
       const err = await response.text();
-      return res.status(502).json({ error: `Anthropic API error: ${response.status}`, detail: err });
+      return res.status(502).json({ error: `Gemini API error: ${response.status}`, detail: err });
     }
 
     const data = await response.json();
-    const text = data.content?.[0]?.text || '';
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // Extract JSON from the response (handle markdown code blocks if present)
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(502).json({ error: 'No JSON in response', raw: text });
 

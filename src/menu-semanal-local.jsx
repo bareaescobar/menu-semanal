@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -983,6 +983,40 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
   );
   const [importUrl, setImportUrl] = useState('');
   const [importing, setImporting] = useState(false); // 'fetch' | 'ai' | false
+  const [generating, setGenerating] = useState(false);
+  const [generateName, setGenerateName] = useState('');
+
+  const handleGenerate = async () => {
+    const q = generateName.trim() || form.name.trim();
+    if (!q) { alert('Escribe primero el nombre del plato'); return; }
+    setGenerating(true);
+    try {
+      const res = await fetch('/api/generate-recipe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: q }),
+        signal: AbortSignal.timeout(25000),
+      });
+      if (!res.ok) throw new Error('api_error');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setForm(prev => ({
+        ...prev,
+        name: data.name || prev.name,
+        time: data.time || prev.time,
+        difficulty: data.difficulty || prev.difficulty,
+        type: data.type || prev.type,
+        slots: data.slots?.length ? data.slots : prev.slots,
+        ingredients: data.ingredients,
+        steps: data.steps,
+      }));
+      setGenerateName('');
+    } catch {
+      alert('No se pudo generar la receta. Comprueba que GEMINI_API_KEY está configurada en Vercel.');
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const handleImportUrl = async () => {
     if (!importUrl.trim()) return;
@@ -1064,6 +1098,31 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
           <button onClick={onClose} style={{ border:'1px solid #ebebeb', background:'white', cursor:'pointer', padding:8, borderRadius:8, color:'#888888' }}><X size={16} /></button>
         </div>
         <div style={{ overflowY:'auto', flex:1, padding:'16px 20px 24px' }}>
+          {/* ── Generar con IA ── */}
+          {isNew && (
+            <div style={{ marginBottom:12, padding:12, background:'#faf5ff', borderRadius:12, border:'1px solid #e9d5ff' }}>
+              <label style={{ ...labelStyle, color:'#7c3aed' }}>✨ Generar receta con IA</label>
+              <div style={{ display:'flex', gap:6 }}>
+                <input value={generateName} onChange={e => setGenerateName(e.target.value)}
+                  placeholder={form.name || 'Ej: Paella valenciana, Lentejas con chorizo…'}
+                  onKeyDown={e => e.key === 'Enter' && handleGenerate()}
+                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#d8b4fe' }} />
+                <button onClick={handleGenerate} disabled={generating}
+                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
+                    background: generating ? '#d8b4fe' : '#7c3aed',
+                    color:'white', fontSize:12, fontWeight:700,
+                    cursor: generating ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
+                  {generating ? '✨ Generando…' : '✨ Generar'}
+                </button>
+              </div>
+              <div style={{ fontSize:10, color:'#7c3aed', marginTop:5 }}>
+                {generating
+                  ? 'La IA está creando ingredientes y pasos…'
+                  : 'Escribe el nombre del plato y la IA rellena todo el formulario'}
+              </div>
+            </div>
+          )}
+
           {/* ── Importar desde URL ── */}
           {isNew && (
             <div style={{ marginBottom:16, padding:12, background:'#f0fdf4', borderRadius:12, border:'1px solid #bbf7d0' }}>

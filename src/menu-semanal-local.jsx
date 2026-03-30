@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.8.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -982,19 +982,40 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
     : BLANK_RECIPE()
   );
   const [importUrl, setImportUrl] = useState('');
-  const [importing, setImporting] = useState(false);
+  const [importing, setImporting] = useState(false); // 'fetch' | 'ai' | false
 
   const handleImportUrl = async () => {
     if (!importUrl.trim()) return;
-    setImporting(true);
+    setImporting('fetch');
     try {
       const data = await importRecipeFromUrl(importUrl.trim());
+
+      // ── Step 2: normalise with AI ────────────────────────────────
+      setImporting('ai');
+      let ingredients = data.ingredients;
+      let steps = data.steps;
+      try {
+        const aiRes = await fetch('/api/normalize-recipe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: data.name, ingredients, steps }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (aiRes.ok) {
+          const normalized = await aiRes.json();
+          if (normalized.ingredients?.length) {
+            ingredients = normalized.ingredients.map((i, idx) => ({ ...i, _id: idx }));
+          }
+          if (normalized.steps?.length) steps = normalized.steps;
+        }
+      } catch {} // AI failure is silent — use raw data
+
       setForm(prev => ({
         ...prev,
         name: data.name || prev.name,
         time: data.time || prev.time,
-        ingredients: data.ingredients,
-        steps: data.steps,
+        ingredients,
+        steps,
       }));
       setImportUrl('');
     } catch (e) {
@@ -1052,15 +1073,26 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
                   placeholder="https://www.allrecipes.com/recipe/..."
                   onKeyDown={e => e.key === 'Enter' && handleImportUrl()}
                   style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#86efac' }} />
-                <button onClick={handleImportUrl} disabled={importing || !importUrl.trim()}
-                  style={{ padding:'8px 14px', borderRadius:999, border:'none', background: importing ? '#86efac' : '#16a34a',
-                    color:'white', fontSize:12, fontWeight:700, cursor: importing ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-                  {importing ? '⏳' : '↓ Importar'}
+                <button onClick={handleImportUrl} disabled={!!importing || !importUrl.trim()}
+                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
+                    background: importing ? '#86efac' : '#16a34a',
+                    color:'white', fontSize:12, fontWeight:700,
+                    cursor: importing ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
+                  {importing === 'fetch' ? '⏳ Descargando…'
+                    : importing === 'ai' ? '✨ Mejorando…'
+                    : '↓ Importar'}
                 </button>
               </div>
-              <div style={{ fontSize:10, color:'#16a34a', marginTop:5 }}>
-                Pega un enlace de AllRecipes, BBC Good Food, Recetas.com y rellena automáticamente
-              </div>
+              {importing === 'ai' && (
+                <div style={{ fontSize:10, color:'#15803d', marginTop:5, fontWeight:600 }}>
+                  ✨ Normalizando ingredientes y pasos con IA…
+                </div>
+              )}
+              {!importing && (
+                <div style={{ fontSize:10, color:'#16a34a', marginTop:5 }}>
+                  Pega un enlace de AllRecipes, BBC Good Food, Recetas.com… la IA normaliza el resultado
+                </div>
+              )}
             </div>
           )}
           <div style={{ marginBottom:16 }}>

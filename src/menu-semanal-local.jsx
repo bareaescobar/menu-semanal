@@ -188,6 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
+const APP_VERSION = '1.6.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -1321,6 +1322,7 @@ export default function App() {
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
   const [dbSyncing, setDbSyncing]       = useState(true);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [selectedDay, setSelectedDay]   = useState(() => {
     const jsDay = new Date().getDay();
     const idx = jsDay === 0 ? 6 : jsDay - 1; // Sun→6, Mon→0
@@ -1390,6 +1392,22 @@ export default function App() {
       if (updated) setRecipeModal(updated);
     }
   }, [recipes]);
+
+  // ── Detección de nueva versión via Service Worker ─────────────
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready.then(reg => {
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            setUpdateAvailable(true);
+          }
+        });
+      });
+    });
+  }, []);
 
   const shoppingList = useMemo(() => {
     const raw = {};
@@ -1493,7 +1511,7 @@ export default function App() {
                 <div className="header-subtitle">
                   {dbSyncing
                     ? '⏳ Sincronizando…'
-                    : `${totalPlatos}/${DAYS.length * 3} platos planificados`}
+                    : `${totalPlatos}/${DAYS.length * 3} platos · v${APP_VERSION}`}
                 </div>
               </div>
             </div>
@@ -1648,6 +1666,19 @@ export default function App() {
                 onClearChecked={() => setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; })} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* BANNER NUEVA VERSIÓN */}
+      {updateAvailable && (
+        <div className="update-banner">
+          <span>🎉 Nueva versión disponible</span>
+          <button className="update-reload-btn" onClick={() => window.location.reload()}>
+            Actualizar
+          </button>
+          <button className="update-close-btn" onClick={() => setUpdateAvailable(false)}>
+            <X size={14}/>
+          </button>
         </div>
       )}
 
@@ -1856,6 +1887,28 @@ export default function App() {
         /* ── Mobile board: hidden on desktop ──────── */
         .mobile-board { display: none; }
         .desktop-board { display: block; }
+
+        /* ── Update banner ─────────────────────────── */
+        .update-banner {
+          position: fixed; bottom: 0; left: 0; right: 0;
+          background: #1d4ed8; color: #fff;
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px 16px;
+          padding-bottom: calc(10px + env(safe-area-inset-bottom));
+          z-index: 200; font-size: 14px; font-weight: 600;
+          box-shadow: 0 -4px 20px rgba(0,0,0,0.18);
+        }
+        .update-banner span { flex: 1; }
+        .update-reload-btn {
+          background: #fff; color: #1d4ed8;
+          border: none; border-radius: 999px;
+          padding: 5px 14px; font-size: 13px; font-weight: 700;
+          cursor: pointer;
+        }
+        .update-close-btn {
+          background: none; border: none; color: rgba(255,255,255,0.8);
+          cursor: pointer; padding: 4px; display: flex; align-items: center;
+        }
 
         /* ── Bottom Nav (mobile only) ──────────────── */
         .bottom-nav { display: none; }

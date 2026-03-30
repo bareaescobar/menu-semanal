@@ -340,9 +340,25 @@ function parseISODuration(d) {
 }
 
 async function importRecipeFromUrl(url) {
-  const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-  const html = await fetch(proxy).then(r => { if (!r.ok) throw new Error('fetch'); return r.text(); });
+  // Intentar varios proxies CORS en cascada
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://thingproxy.freeboard.io/fetch/${url}`,
+  ];
+
+  let html = null;
+  for (const proxy of proxies) {
+    try {
+      const r = await fetch(proxy, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (r.ok) { html = await r.text(); break; }
+    } catch {}
+  }
+  if (!html) throw new Error('fetch');
+
   const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // 1. Buscar JSON-LD con schema.org/Recipe
   let recipeData = null;
   for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
     try {
@@ -350,6 +366,7 @@ async function importRecipeFromUrl(url) {
       const find = obj => {
         if (!obj) return null;
         if (obj['@type'] === 'Recipe') return obj;
+        if (Array.isArray(obj['@type']) && obj['@type'].includes('Recipe')) return obj;
         if (Array.isArray(obj)) { for (const i of obj) { const r = find(i); if (r) return r; } }
         if (obj['@graph']) return find(obj['@graph']);
         return null;
@@ -358,6 +375,28 @@ async function importRecipeFromUrl(url) {
       if (recipeData) break;
     } catch {}
   }
+
+  // 2. Fallback: buscar microdata itemtype="Recipe"
+  if (!recipeData) {
+    const itemEl = doc.querySelector('[itemtype*="Recipe"]');
+    if (itemEl) {
+      const getProp = (name) => {
+        const el = itemEl.querySelector(`[itemprop="${name}"]`);
+        return el ? (el.getAttribute('content') || el.textContent.trim()) : '';
+      };
+      const ingEls = itemEl.querySelectorAll('[itemprop="recipeIngredient"], [itemprop="ingredients"]');
+      const stepEls = itemEl.querySelectorAll('[itemprop="recipeInstructions"] [itemprop="text"], [itemprop="step"]');
+      if (ingEls.length || stepEls.length) {
+        recipeData = {
+          name: getProp('name'),
+          cookTime: getProp('cookTime') || getProp('totalTime'),
+          recipeIngredient: [...ingEls].map(e => e.textContent.trim()),
+          recipeInstructions: [...stepEls].map(e => e.textContent.trim()),
+        };
+      }
+    }
+  }
+
   if (!recipeData) throw new Error('no_recipe');
 
   const name = recipeData.name || '';
@@ -869,8 +908,11 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
         steps: data.steps,
       }));
       setImportUrl('');
-    } catch {
-      alert('No se pudo extraer la receta. Asegúrate de que la URL es de una web de recetas conocida (ej: allrecipes.com, recetas.com, etc.)');
+    } catch (e) {
+      const msg = e.message === 'no_recipe'
+        ? 'La web no tiene los datos estructurados necesarios.\n\nPrueba con: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net, cookpad.com'
+        : 'No se pudo acceder a la URL. La web puede bloquear el acceso automático.\n\nPrueba con: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net';
+      alert(msg);
     } finally {
       setImporting(false);
     }

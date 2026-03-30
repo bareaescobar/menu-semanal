@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -505,7 +505,7 @@ async function importRecipeFromUrl(url) {
 }
 
 
-function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRecipe }) {
+function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRecipe, hasOverride }) {
   const [hover, setHover] = useState(false);
   const [btnHover, setBtnHover] = useState(false);
   const s = SS[slotKey];
@@ -517,7 +517,7 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
   if (recipe) {
     const isFuera = recipe.id === '__fuera__';
     return (
-      <div onClick={() => !isFuera && onViewRecipe(menuVal)}
+      <div onClick={() => !isFuera && onViewRecipe(menuVal, slotKey)}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         className="postit-filled"
         style={{
@@ -541,6 +541,12 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
           </div>
         )}
         {t && <div className="postit-tag" style={{ color: s.accent, background: 'transparent' }}>{t.label.split(' ')[1]}</div>}
+        {hasOverride && (
+          <div style={{ position:'absolute', top:4, right:20, fontSize:9, fontWeight:700,
+            background:'#fef3c7', color:'#92400e', borderRadius:4, padding:'1px 4px', lineHeight:1.4 }}>
+            ✏️ mod.
+          </div>
+        )}
       </div>
     );
   }
@@ -563,7 +569,7 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
 }
 
 // ── DayColumn ─────────────────────────────────────────────────────
-function DayColumn({ day, dayShort, menuDay, recipes, onSlotClick, onRemoveSlot, onViewRecipe }) {
+function DayColumn({ day, dayShort, menuDay, recipes, overrides, onSlotClick, onRemoveSlot, onViewRecipe }) {
   const filledCount = SLOTS.filter(({key}) => menuDay[key]).length;
   return (
     <div className="day-column">
@@ -578,9 +584,10 @@ function DayColumn({ day, dayShort, menuDay, recipes, onSlotClick, onRemoveSlot,
         {SLOTS.map(({ key }) => (
           <PostItSlot key={key} slotKey={key}
             menuVal={menuDay[key]} recipes={recipes}
+            hasOverride={overrides?.[`${day}_${key}`]?.recipeId === menuDay[key]}
             onSlotClick={() => onSlotClick(day, key)}
             onRemove={() => onRemoveSlot(day, key)}
-            onViewRecipe={onViewRecipe} />
+            onViewRecipe={(rid, sk) => onViewRecipe(rid, sk, day)} />
         ))}
       </div>
     </div>
@@ -829,7 +836,7 @@ function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose
 }
 
 // ── RecipeModal ───────────────────────────────────────────────────
-function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit }) {
+function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit, weekContext, onEditWeek }) {
   const [editing, setEditing] = useState(false);
   const [localIngs, setLocalIngs] = useState(recipe.ingredients.map((ing, i) => ({ ...ing, _id: i })));
   const t = TS[recipe.type] || {};
@@ -866,6 +873,14 @@ function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit }) {
               </div>
             </div>
             <div style={{ display:'flex', gap:6 }}>
+              {weekContext && onEditWeek && (
+                <button onClick={() => onEditWeek(recipe, weekContext)}
+                  title="Modifica ingredientes solo para esta semana, sin cambiar la receta original"
+                  style={{ border:'none', background:'#fef3c7', cursor:'pointer', padding:'7px 10px', borderRadius:8,
+                    color:'#92400e', display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700 }}>
+                  <Pencil size={13}/> Esta semana
+                </button>
+              )}
               {onEdit && (
                 <button onClick={()=>onEdit(recipe)}
                   style={{ border:'1px solid #ebebeb', background:'white', cursor:'pointer', padding:8, borderRadius:8, color:'#666666', display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:600 }}>
@@ -975,8 +990,8 @@ const BLANK_RECIPE = () => ({
   steps:[''],
 });
 
-function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
-  const isNew = !recipe;
+function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
+  const isNew = !recipe && !isOverride;
   const [form, setForm] = useState(() => recipe
     ? { ...recipe, ingredients: recipe.ingredients.map((i,idx)=>({...i,_id:idx})), steps:[...recipe.steps] }
     : BLANK_RECIPE()
@@ -1094,10 +1109,20 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
       <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:540,
         boxShadow:'0 -8px 40px rgba(0,0,0,0.25)', display:'flex', flexDirection:'column', maxHeight:'92vh' }}>
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid #ebebeb', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
-          <div style={{ fontWeight:700, fontSize:16, color:'#111111' }}>{isNew ? '✨ Nueva receta' : '✏️ Editar receta'}</div>
+          <div style={{ fontWeight:700, fontSize:16, color:'#111111' }}>
+            {isNew ? '✨ Nueva receta' : isOverride ? '📅 Editar para esta semana' : '✏️ Editar receta'}
+          </div>
           <button onClick={onClose} style={{ border:'1px solid #ebebeb', background:'white', cursor:'pointer', padding:8, borderRadius:8, color:'#888888' }}><X size={16} /></button>
         </div>
         <div style={{ overflowY:'auto', flex:1, padding:'16px 20px 24px' }}>
+          {/* ── Override banner ── */}
+          {isOverride && (
+            <div style={{ marginBottom:14, padding:'10px 12px', background:'#fef3c7', borderRadius:10,
+              border:'1px solid #fcd34d', fontSize:12, color:'#92400e', lineHeight:1.5 }}>
+              <strong>📅 Solo para esta semana</strong> — Los cambios no modifican la receta original.
+              Solo los ingredientes afectan a la lista de la compra de esta semana.
+            </div>
+          )}
           {/* ── Generar con IA ── */}
           {isNew && (
             <div style={{ marginBottom:12, padding:12, background:'#faf5ff', borderRadius:12, border:'1px solid #e9d5ff' }}>
@@ -1259,7 +1284,7 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
           </button>
           <button onClick={handleSave}
             style={{ flex:2, padding:'10px', borderRadius:10, fontSize:13, border:'none', background:'#f59e0b', color:'white', cursor:'pointer', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-            <Save size={14}/> {isNew ? 'Crear receta' : 'Guardar cambios'}
+            <Save size={14}/> {isNew ? 'Crear receta' : isOverride ? 'Guardar para esta semana' : 'Guardar cambios'}
           </button>
         </div>
       </div>
@@ -1496,7 +1521,9 @@ export default function App() {
   const [weekKey, setWeekKey]           = useState(() => getWeekKey(new Date()));
   const [activeSlot, setActiveSlot]     = useState(null);
   const [recipeModal, setRecipeModal]   = useState(null);
+  const [recipeModalCtx, setRecipeModalCtx] = useState(null); // {day, slotKey} when opened from board
   const [recipeEditor, setRecipeEditor] = useState(null); // null=cerrado, false=nueva, obj=editar
+  const [overrideCtx, setOverrideCtx]   = useState(null); // {day, slotKey, recipeId} when editing override
   const [mobileTab, setMobileTab]       = useState('board');
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
@@ -1595,7 +1622,10 @@ export default function App() {
         const rid = menu[day]?.[key];
         if (!rid || rid === '__fuera__') return;
         const rec = recipes.find(r => r.id === rid); if (!rec) return;
-        rec.ingredients.forEach(ing => {
+        // Use weekly override ingredients if they exist for this recipe+slot
+        const ov = menu._overrides?.[`${day}_${key}`];
+        const ingredients = (ov?.recipeId === rid) ? ov.ingredients : rec.ingredients;
+        ingredients.forEach(ing => {
           const nameKey = ing.name.trim().toLowerCase();
           if (!raw[nameKey]) raw[nameKey] = { name: ing.name, amounts: [] };
           raw[nameKey].amounts.push(ing.amount);
@@ -1605,7 +1635,7 @@ export default function App() {
     return Object.values(raw).map(({ name, amounts }) => ({ k: name.toLowerCase(), name, amount: mergeAmounts(amounts) }));
   }, [menu, recipes]);
 
-  const totalPlatos    = Object.values(menu).reduce((a, d) => a + Object.values(d).filter(Boolean).length, 0);
+  const totalPlatos = DAYS.reduce((a, day) => a + SLOTS.filter(({key}) => menu[day]?.[key]).length, 0);
   const uncheckedCount = shoppingList.filter(i => !checked.has(i.k)).length;
 
   // ── Sugerencias inteligentes ──────────────────────────────────
@@ -1642,6 +1672,19 @@ export default function App() {
       [...prev].forEach(k => { if (!validKeys.has(k)) next.delete(k); });
       return next;
     });
+  };
+
+  const handleSaveOverride = (modifiedRecipe) => {
+    const { day, slotKey, recipeId } = overrideCtx;
+    setMenu(prev => ({
+      ...prev,
+      _overrides: {
+        ...(prev._overrides || {}),
+        [`${day}_${slotKey}`]: { recipeId, ingredients: modifiedRecipe.ingredients },
+      },
+    }));
+    setOverrideCtx(null);
+    setRecipeEditor(null);
   };
 
   const handleSaveRecipe = (recipe) => {
@@ -1798,9 +1841,10 @@ export default function App() {
                     </div>
                     <PostItSlot slotKey={key}
                       menuVal={menu[selectedDay]?.[key]} recipes={recipes}
+                      hasOverride={menu._overrides?.[`${selectedDay}_${key}`]?.recipeId === menu[selectedDay]?.[key]}
                       onSlotClick={() => { setDrawerFilter('all'); setActiveSlot({ day:selectedDay, slotKey:key }); }}
                       onRemove={() => setMenu(p => ({ ...p, [selectedDay]:{ ...p[selectedDay], [key]:null } }))}
-                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                      onViewRecipe={(rid, sk) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: selectedDay, slotKey: sk }); } }} />
                   </div>
                 ))}
               </div>
@@ -1824,9 +1868,10 @@ export default function App() {
                     <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
                       menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
                       recipes={recipes}
+                      overrides={menu._overrides}
                       onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
                       onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
-                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                      onViewRecipe={(rid, sk, d) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: d, slotKey: sk }); } }} />
                   ))}
                 </div>
               </div>
@@ -1888,18 +1933,25 @@ export default function App() {
 
       {/* MODAL RECETA */}
       {recipeModal && (
-        <RecipeModal recipe={recipeModal} onClose={() => setRecipeModal(null)}
+        <RecipeModal recipe={recipeModal} onClose={() => { setRecipeModal(null); setRecipeModalCtx(null); }}
           onUpdateIngredients={handleUpdateIngredients}
-          onEdit={r => { setRecipeModal(null); setRecipeEditor(r); }} />
+          onEdit={r => { setRecipeModal(null); setRecipeModalCtx(null); setRecipeEditor(r); }}
+          weekContext={recipeModalCtx}
+          onEditWeek={(r, ctx) => {
+            setRecipeModal(null);
+            setOverrideCtx({ day: ctx.day, slotKey: ctx.slotKey, recipeId: r.id });
+            setRecipeEditor(r);
+          }} />
       )}
 
       {/* EDITOR RECETA */}
       {recipeEditor !== null && (
         <RecipeEditor
           recipe={recipeEditor || null}
-          onSave={handleSaveRecipe}
-          onDelete={handleDeleteRecipe}
-          onClose={() => setRecipeEditor(null)} />
+          isOverride={!!overrideCtx}
+          onSave={overrideCtx ? handleSaveOverride : handleSaveRecipe}
+          onDelete={overrideCtx ? null : handleDeleteRecipe}
+          onClose={() => { setRecipeEditor(null); setOverrideCtx(null); }} />
       )}
 
       <style>{`

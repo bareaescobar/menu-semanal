@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.7.1';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -387,63 +387,93 @@ async function importRecipeFromUrl(url) {
     } catch {}
   }
 
-  // ── 2. Microdata fallback (some Spanish sites) ──
-  if (!recipeData) {
-    const itemEl = doc.querySelector('[itemtype*="schema.org/Recipe"]');
-    if (itemEl) {
-      const getProp = name => {
-        const el = itemEl.querySelector(`[itemprop="${name}"]`);
-        return el ? (el.getAttribute('content') || el.textContent.trim()) : '';
-      };
-      const ingEls = itemEl.querySelectorAll('[itemprop="recipeIngredient"],[itemprop="ingredients"]');
-      const stepEls = itemEl.querySelectorAll('[itemprop="recipeInstructions"] [itemprop="text"],[itemprop="step"]');
-      if (ingEls.length || stepEls.length) {
-        recipeData = {
-          name: getProp('name'),
-          totalTime: getProp('totalTime') || getProp('cookTime'),
-          recipeIngredient: [...ingEls].map(e => e.textContent.trim()).filter(Boolean),
-          recipeInstructions: [...stepEls].map(e => e.textContent.trim()).filter(Boolean),
-        };
-      }
+  // Helper: extract text from an element replacing <br> with newlines
+  const brText = el => {
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+    return clone.textContent;
+  };
+
+  // Helper: extract ingredient lines from a container that uses <br> or <li>
+  const extractIngLines = container => {
+    const lis = container.querySelectorAll('li');
+    if (lis.length > 1) return [...lis].map(e => e.textContent.trim()).filter(Boolean);
+    // <p> with <br> (recetas.com style)
+    const ps = container.querySelectorAll('p');
+    const lines = [];
+    ps.forEach(p => brText(p).split('\n').forEach(l => { const t = l.trim(); if (t) lines.push(t); }));
+    return lines;
+  };
+
+  // Helper: extract instruction paragraphs
+  const extractStepLines = container => {
+    const lis = container.querySelectorAll('li');
+    if (lis.length > 1) return [...lis].map(e => e.textContent.trim()).filter(Boolean);
+    return [...container.querySelectorAll('p')].map(e => e.textContent.trim()).filter(Boolean);
+  };
+
+  // ── 2. Supplement incomplete JSON-LD from HTML (e.g. recetas.com has name/time in LD but no ingredients) ──
+  if (recipeData && (!recipeData.recipeIngredient?.length || !recipeData.recipeInstructions?.length)) {
+    // data-vocabulary.org/RecipeIngredient
+    const ingDiv = doc.querySelector('[itemprop="ingredient"],[itemtype*="RecipeIngredient"]');
+    if (ingDiv && !recipeData.recipeIngredient?.length) {
+      recipeData.recipeIngredient = extractIngLines(ingDiv);
+    }
+    // data-vocabulary.org instructions
+    const instrDiv = doc.querySelector('[itemprop="instructions"],.preparation_info,.recipe-instructions,.instructions');
+    if (instrDiv && !recipeData.recipeInstructions?.length) {
+      recipeData.recipeInstructions = extractStepLines(instrDiv);
     }
   }
 
-  // ── 3. Heuristic fallback: look for common HTML patterns ──
+  // ── 3. Microdata fallback — schema.org/Recipe AND data-vocabulary.org/Recipe ──
   if (!recipeData) {
-    // Try to find name
-    const titleEl = doc.querySelector('h1.recipe-title, h1[class*="recipe"], h1[class*="titulo"], h1') ;
+    const itemEl = doc.querySelector(
+      '[itemtype*="schema.org/Recipe"],[itemtype*="data-vocabulary.org/Recipe"]'
+    );
+    if (itemEl) {
+      const getProp = name => {
+        const el = itemEl.querySelector(`[itemprop="${name}"]`);
+        return el ? (el.getAttribute('content') || el.getAttribute('datetime') || el.textContent.trim()) : '';
+      };
+      const ingDiv  = itemEl.querySelector('[itemprop="ingredient"],[itemprop="recipeIngredient"],[itemprop="ingredients"]');
+      const instrDiv = itemEl.querySelector('[itemprop="instructions"],[itemprop="recipeInstructions"]');
+      recipeData = {
+        name: getProp('name'),
+        totalTime: getProp('totalTime') || getProp('cookTime') || getProp('prepTime'),
+        recipeIngredient: ingDiv ? extractIngLines(ingDiv) : [],
+        recipeInstructions: instrDiv ? extractStepLines(instrDiv) : [],
+      };
+      if (!recipeData.recipeIngredient.length && !recipeData.recipeInstructions.length) recipeData = null;
+    }
+  }
+
+  // ── 4. Heuristic fallback: look for common HTML class patterns ──
+  if (!recipeData) {
+    const titleEl = doc.querySelector('h1.recipe-title,h1[class*="recipe"],h1[class*="titulo"],h1');
     const name = titleEl ? titleEl.textContent.trim() : doc.title.replace(/\s*[-|].*$/, '').trim();
 
-    // Look for ingredient lists (common class names)
     const ingSelectors = [
-      '.recipe-ingredients li', '.ingredients li', '[class*="ingredient"] li',
-      '[class*="ingrediente"] li', '.wprm-recipe-ingredient', '.tasty-recipe-ingredients li',
+      '.recipe-ingredients','.ingredients-section','.ingredients',
+      '[class*="ingredient"]','[class*="ingrediente"]',
+      '.wprm-recipe-ingredients-container','.tasty-recipe-ingredients',
     ];
-    let ingEls = [];
-    for (const sel of ingSelectors) {
-      ingEls = [...doc.querySelectorAll(sel)];
-      if (ingEls.length > 2) break;
-    }
+    let ingEl = null;
+    for (const sel of ingSelectors) { ingEl = doc.querySelector(sel); if (ingEl) break; }
 
-    // Look for steps
     const stepSelectors = [
-      '.recipe-instructions li', '.instructions li', '[class*="instruction"] li',
-      '[class*="paso"] li', '[class*="step"] li', '.wprm-recipe-instruction',
-      '.tasty-recipe-instructions li',
+      '.recipe-instructions','.instructions-section','.instructions',
+      '[class*="instruction"]','[class*="paso"]','[class*="step"]',
+      '.wprm-recipe-instructions-container','.tasty-recipe-instructions','.preparation_info',
     ];
-    let stepEls = [];
-    for (const sel of stepSelectors) {
-      stepEls = [...doc.querySelectorAll(sel)];
-      if (stepEls.length > 1) break;
-    }
+    let stepEl = null;
+    for (const sel of stepSelectors) { stepEl = doc.querySelector(sel); if (stepEl) break; }
 
-    if (ingEls.length > 2 || stepEls.length > 1) {
-      recipeData = {
-        name,
-        totalTime: null,
-        recipeIngredient: ingEls.map(e => e.textContent.trim()).filter(Boolean),
-        recipeInstructions: stepEls.map(e => e.textContent.trim()).filter(Boolean),
-      };
+    const ings  = ingEl  ? extractIngLines(ingEl)   : [];
+    const steps = stepEl ? extractStepLines(stepEl) : [];
+
+    if (ings.length > 1 || steps.length > 1) {
+      recipeData = { name, totalTime: null, recipeIngredient: ings, recipeInstructions: steps };
     }
   }
 

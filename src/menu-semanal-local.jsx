@@ -1355,12 +1355,14 @@ export default function App() {
             </div>
           </div>
 
-          {/* LISTA COMPRA */}
-          <div className={`shopping-sidebar ${mobileTab === 'board' ? 'hidden-mobile' : ''}`} id="sidebar-shopping">
-            <ShoppingList items={shoppingList} checked={checked} weekKey={weekKey}
-              onToggle={k => setChecked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-              onClearChecked={() => setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; })} />
-          </div>
+          {/* LISTA COMPRA — solo en tab 'shop' */}
+          {mobileTab === 'shop' && (
+            <div className="shopping-sidebar" id="sidebar-shopping">
+              <ShoppingList items={shoppingList} checked={checked} weekKey={weekKey}
+                onToggle={k => setChecked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; })}
+                onClearChecked={() => setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; })} />
+            </div>
+          )}
         </div>
       )}
 
@@ -1710,7 +1712,6 @@ export default function App() {
         }
 
         @media (min-width: 768px) {
-          #sidebar-shopping { display: block !important; }
           .hidden-mobile { display: block; }
           .tab-content { padding-bottom: 16px; }
           .main-layout { padding-bottom: 24px; }

@@ -188,6 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
+const APP_VERSION = '1.10.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -339,84 +340,172 @@ function parseISODuration(d) {
   return (parseInt(m[1]||0) * 60) + parseInt(m[2]||0);
 }
 
-async function importRecipeFromUrl(url) {
-  // Intentar varios proxies CORS en cascada
-  const proxies = [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    `https://corsproxy.io/?${encodeURIComponent(url)}`,
-    `https://thingproxy.freeboard.io/fetch/${url}`,
-  ];
+// Fetch HTML through our Vercel serverless proxy (avoids CORS + gets proper server-side fetch)
+async function fetchViaProxy(url) {
+  const proxyUrl = `/api/fetch-recipe?url=${encodeURIComponent(url)}`;
+  const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`proxy_${r.status}`);
+  return r.text();
+}
 
-  let html = null;
-  for (const proxy of proxies) {
-    try {
-      const r = await fetch(proxy, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (r.ok) { html = await r.text(); break; }
-    } catch {}
+// Find a schema.org/Recipe node anywhere inside a parsed JSON-LD tree
+function findRecipeJsonLd(obj) {
+  if (!obj) return null;
+  if (obj['@type'] === 'Recipe') return obj;
+  if (Array.isArray(obj['@type']) && obj['@type'].includes('Recipe')) return obj;
+  if (Array.isArray(obj)) { for (const i of obj) { const r = findRecipeJsonLd(i); if (r) return r; } }
+  if (obj['@graph']) return findRecipeJsonLd(obj['@graph']);
+  return null;
+}
+
+// Parse an ingredient string into { name, amount }
+function parseIngredientLine(str) {
+  // Examples: "200 g de harina", "2 huevos", "1 taza de leche", "sal al gusto"
+  const m = str.match(/^([\d½¼¾⅓⅔,. \/]+\s*(?:g|kg|ml|l|cl|oz|lb|ud\.?|unidades?|cdas?\.?|cdtas?\.?|cucharadas?|cucharitas?|tazas?|vasos?|pizca|diente[s]?|manojo|rama[s]?|lata[s]?|bote[s]?|paquete[s]?|loncha[s]?|filete[s]?|trozo[s]?)?\s*(?:de\s+)?)/i);
+  if (m && m[1].trim()) {
+    return { name: str.slice(m[1].length).trim(), amount: m[1].trim() };
   }
-  if (!html) throw new Error('fetch');
+  return { name: str.trim(), amount: '' };
+}
+
+async function importRecipeFromUrl(url) {
+  let html;
+  try {
+    html = await fetchViaProxy(url);
+  } catch (e) {
+    throw new Error('fetch');
+  }
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
-  // 1. Buscar JSON-LD con schema.org/Recipe
+  // ── 1. JSON-LD (most reliable — used by allrecipes, bbcgoodfood, directoalpaladar, etc.) ──
   let recipeData = null;
   for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
     try {
-      const raw = JSON.parse(script.textContent);
-      const find = obj => {
-        if (!obj) return null;
-        if (obj['@type'] === 'Recipe') return obj;
-        if (Array.isArray(obj['@type']) && obj['@type'].includes('Recipe')) return obj;
-        if (Array.isArray(obj)) { for (const i of obj) { const r = find(i); if (r) return r; } }
-        if (obj['@graph']) return find(obj['@graph']);
-        return null;
-      };
-      recipeData = find(raw);
+      recipeData = findRecipeJsonLd(JSON.parse(script.textContent));
       if (recipeData) break;
     } catch {}
   }
 
-  // 2. Fallback: buscar microdata itemtype="Recipe"
+  // Helper: extract text from an element replacing <br> with newlines
+  const brText = el => {
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+    return clone.textContent;
+  };
+
+  // Helper: extract ingredient lines from a container that uses <br> or <li>
+  const extractIngLines = container => {
+    const lis = container.querySelectorAll('li');
+    if (lis.length > 1) return [...lis].map(e => e.textContent.trim()).filter(Boolean);
+    // <p> with <br> (recetas.com style)
+    const ps = container.querySelectorAll('p');
+    const lines = [];
+    ps.forEach(p => brText(p).split('\n').forEach(l => { const t = l.trim(); if (t) lines.push(t); }));
+    return lines;
+  };
+
+  // Helper: extract instruction paragraphs
+  const extractStepLines = container => {
+    const lis = container.querySelectorAll('li');
+    if (lis.length > 1) return [...lis].map(e => e.textContent.trim()).filter(Boolean);
+    return [...container.querySelectorAll('p')].map(e => e.textContent.trim()).filter(Boolean);
+  };
+
+  // ── 2. Supplement incomplete JSON-LD from HTML (e.g. recetas.com has name/time in LD but no ingredients) ──
+  if (recipeData && (!recipeData.recipeIngredient?.length || !recipeData.recipeInstructions?.length)) {
+    // data-vocabulary.org/RecipeIngredient
+    const ingDiv = doc.querySelector('[itemprop="ingredient"],[itemtype*="RecipeIngredient"]');
+    if (ingDiv && !recipeData.recipeIngredient?.length) {
+      recipeData.recipeIngredient = extractIngLines(ingDiv);
+    }
+    // data-vocabulary.org instructions
+    const instrDiv = doc.querySelector('[itemprop="instructions"],.preparation_info,.recipe-instructions,.instructions');
+    if (instrDiv && !recipeData.recipeInstructions?.length) {
+      recipeData.recipeInstructions = extractStepLines(instrDiv);
+    }
+  }
+
+  // ── 3. Microdata fallback — schema.org/Recipe AND data-vocabulary.org/Recipe ──
   if (!recipeData) {
-    const itemEl = doc.querySelector('[itemtype*="Recipe"]');
+    const itemEl = doc.querySelector(
+      '[itemtype*="schema.org/Recipe"],[itemtype*="data-vocabulary.org/Recipe"]'
+    );
     if (itemEl) {
-      const getProp = (name) => {
+      const getProp = name => {
         const el = itemEl.querySelector(`[itemprop="${name}"]`);
-        return el ? (el.getAttribute('content') || el.textContent.trim()) : '';
+        return el ? (el.getAttribute('content') || el.getAttribute('datetime') || el.textContent.trim()) : '';
       };
-      const ingEls = itemEl.querySelectorAll('[itemprop="recipeIngredient"], [itemprop="ingredients"]');
-      const stepEls = itemEl.querySelectorAll('[itemprop="recipeInstructions"] [itemprop="text"], [itemprop="step"]');
-      if (ingEls.length || stepEls.length) {
-        recipeData = {
-          name: getProp('name'),
-          cookTime: getProp('cookTime') || getProp('totalTime'),
-          recipeIngredient: [...ingEls].map(e => e.textContent.trim()),
-          recipeInstructions: [...stepEls].map(e => e.textContent.trim()),
-        };
-      }
+      const ingDiv  = itemEl.querySelector('[itemprop="ingredient"],[itemprop="recipeIngredient"],[itemprop="ingredients"]');
+      const instrDiv = itemEl.querySelector('[itemprop="instructions"],[itemprop="recipeInstructions"]');
+      recipeData = {
+        name: getProp('name'),
+        totalTime: getProp('totalTime') || getProp('cookTime') || getProp('prepTime'),
+        recipeIngredient: ingDiv ? extractIngLines(ingDiv) : [],
+        recipeInstructions: instrDiv ? extractStepLines(instrDiv) : [],
+      };
+      if (!recipeData.recipeIngredient.length && !recipeData.recipeInstructions.length) recipeData = null;
+    }
+  }
+
+  // ── 4. Heuristic fallback: look for common HTML class patterns ──
+  if (!recipeData) {
+    const titleEl = doc.querySelector('h1.recipe-title,h1[class*="recipe"],h1[class*="titulo"],h1');
+    const name = titleEl ? titleEl.textContent.trim() : doc.title.replace(/\s*[-|].*$/, '').trim();
+
+    const ingSelectors = [
+      '.recipe-ingredients','.ingredients-section','.ingredients',
+      '[class*="ingredient"]','[class*="ingrediente"]',
+      '.wprm-recipe-ingredients-container','.tasty-recipe-ingredients',
+    ];
+    let ingEl = null;
+    for (const sel of ingSelectors) { ingEl = doc.querySelector(sel); if (ingEl) break; }
+
+    const stepSelectors = [
+      '.recipe-instructions','.instructions-section','.instructions',
+      '[class*="instruction"]','[class*="paso"]','[class*="step"]',
+      '.wprm-recipe-instructions-container','.tasty-recipe-instructions','.preparation_info',
+    ];
+    let stepEl = null;
+    for (const sel of stepSelectors) { stepEl = doc.querySelector(sel); if (stepEl) break; }
+
+    const ings  = ingEl  ? extractIngLines(ingEl)   : [];
+    const steps = stepEl ? extractStepLines(stepEl) : [];
+
+    if (ings.length > 1 || steps.length > 1) {
+      recipeData = { name, totalTime: null, recipeIngredient: ings, recipeInstructions: steps };
     }
   }
 
   if (!recipeData) throw new Error('no_recipe');
 
-  const name = recipeData.name || '';
-  const time = parseISODuration(recipeData.cookTime || recipeData.totalTime) || 30;
-  const ingredients = (recipeData.recipeIngredient || []).map((ing, _id) => {
-    const m = ing.match(/^([\d½¼¾\/\s]+(?:g|kg|ml|l|ud|cdas?|cdtas?|taza|vaso|pizca|diente|manojo|rama|lata|bote)?(?:\s+de)?)\s+(.+)/i);
-    return m ? { name: m[2].trim(), amount: m[1].trim(), _id } : { name: ing.trim(), amount: '', _id };
-  });
+  // ── Build the result object ──
+  const name = (recipeData.name || '').replace(/<[^>]+>/g, '').trim();
+  const time = parseISODuration(recipeData.totalTime || recipeData.cookTime) || 30;
+
+  const ingredients = (recipeData.recipeIngredient || [])
+    .map(ing => ing.replace(/<[^>]+>/g, '').trim())
+    .filter(Boolean)
+    .map((ing, _id) => ({ ...parseIngredientLine(ing), _id }));
+
   const steps = [];
   const instr = recipeData.recipeInstructions || [];
   (Array.isArray(instr) ? instr : [instr]).forEach(i => {
-    if (typeof i === 'string') steps.push(i);
-    else if (i.text) steps.push(i.text);
-    else if (i.itemListElement) i.itemListElement.forEach(x => x.text && steps.push(x.text));
+    if (typeof i === 'string' && i.trim()) steps.push(i.trim());
+    else if (i && i.text) steps.push(i.text.trim());
+    else if (i && i.itemListElement) i.itemListElement.forEach(x => x.text && steps.push(x.text.trim()));
   });
-  return { name, time, ingredients: ingredients.length ? ingredients : [{ name:'', amount:'', _id:0 }], steps: steps.length ? steps : [''] };
+
+  return {
+    name,
+    time,
+    ingredients: ingredients.length ? ingredients : [{ name:'', amount:'', _id:0 }],
+    steps: steps.filter(Boolean).length ? steps.filter(Boolean) : [''],
+  };
 }
 
 
-function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRecipe }) {
+function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRecipe, hasOverride }) {
   const [hover, setHover] = useState(false);
   const [btnHover, setBtnHover] = useState(false);
   const s = SS[slotKey];
@@ -428,7 +517,7 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
   if (recipe) {
     const isFuera = recipe.id === '__fuera__';
     return (
-      <div onClick={() => !isFuera && onViewRecipe(menuVal)}
+      <div onClick={() => !isFuera && onViewRecipe(menuVal, slotKey)}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         className="postit-filled"
         style={{
@@ -452,6 +541,12 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
           </div>
         )}
         {t && <div className="postit-tag" style={{ color: s.accent, background: 'transparent' }}>{t.label.split(' ')[1]}</div>}
+        {hasOverride && (
+          <div style={{ position:'absolute', top:4, right:20, fontSize:9, fontWeight:700,
+            background:'#fef3c7', color:'#92400e', borderRadius:4, padding:'1px 4px', lineHeight:1.4 }}>
+            ✏️ mod.
+          </div>
+        )}
       </div>
     );
   }
@@ -474,7 +569,7 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
 }
 
 // ── DayColumn ─────────────────────────────────────────────────────
-function DayColumn({ day, dayShort, menuDay, recipes, onSlotClick, onRemoveSlot, onViewRecipe }) {
+function DayColumn({ day, dayShort, menuDay, recipes, overrides, onSlotClick, onRemoveSlot, onViewRecipe }) {
   const filledCount = SLOTS.filter(({key}) => menuDay[key]).length;
   return (
     <div className="day-column">
@@ -489,9 +584,10 @@ function DayColumn({ day, dayShort, menuDay, recipes, onSlotClick, onRemoveSlot,
         {SLOTS.map(({ key }) => (
           <PostItSlot key={key} slotKey={key}
             menuVal={menuDay[key]} recipes={recipes}
+            hasOverride={overrides?.[`${day}_${key}`]?.recipeId === menuDay[key]}
             onSlotClick={() => onSlotClick(day, key)}
             onRemove={() => onRemoveSlot(day, key)}
-            onViewRecipe={onViewRecipe} />
+            onViewRecipe={(rid, sk) => onViewRecipe(rid, sk, day)} />
         ))}
       </div>
     </div>
@@ -740,7 +836,7 @@ function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose
 }
 
 // ── RecipeModal ───────────────────────────────────────────────────
-function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit }) {
+function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit, weekContext, onEditWeek }) {
   const [editing, setEditing] = useState(false);
   const [localIngs, setLocalIngs] = useState(recipe.ingredients.map((ing, i) => ({ ...ing, _id: i })));
   const t = TS[recipe.type] || {};
@@ -777,6 +873,14 @@ function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit }) {
               </div>
             </div>
             <div style={{ display:'flex', gap:6 }}>
+              {weekContext && onEditWeek && (
+                <button onClick={() => onEditWeek(recipe, weekContext)}
+                  title="Modifica ingredientes solo para esta semana, sin cambiar la receta original"
+                  style={{ border:'none', background:'#fef3c7', cursor:'pointer', padding:'7px 10px', borderRadius:8,
+                    color:'#92400e', display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700 }}>
+                  <Pencil size={13}/> Esta semana
+                </button>
+              )}
               {onEdit && (
                 <button onClick={()=>onEdit(recipe)}
                   style={{ border:'1px solid #ebebeb', background:'white', cursor:'pointer', padding:8, borderRadius:8, color:'#666666', display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:600 }}>
@@ -886,32 +990,87 @@ const BLANK_RECIPE = () => ({
   steps:[''],
 });
 
-function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
-  const isNew = !recipe;
+function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
+  const isNew = !recipe && !isOverride;
   const [form, setForm] = useState(() => recipe
     ? { ...recipe, ingredients: recipe.ingredients.map((i,idx)=>({...i,_id:idx})), steps:[...recipe.steps] }
     : BLANK_RECIPE()
   );
   const [importUrl, setImportUrl] = useState('');
-  const [importing, setImporting] = useState(false);
+  const [importing, setImporting] = useState(false); // 'fetch' | 'ai' | false
+  const [generating, setGenerating] = useState(false);
+  const [generateName, setGenerateName] = useState('');
 
-  const handleImportUrl = async () => {
-    if (!importUrl.trim()) return;
-    setImporting(true);
+  const handleGenerate = async () => {
+    const q = generateName.trim() || form.name.trim();
+    if (!q) { alert('Escribe primero el nombre del plato'); return; }
+    setGenerating(true);
     try {
-      const data = await importRecipeFromUrl(importUrl.trim());
+      const res = await fetch('/api/generate-recipe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: q }),
+        signal: AbortSignal.timeout(25000),
+      });
+      if (!res.ok) throw new Error('api_error');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
       setForm(prev => ({
         ...prev,
         name: data.name || prev.name,
         time: data.time || prev.time,
+        difficulty: data.difficulty || prev.difficulty,
+        type: data.type || prev.type,
+        slots: data.slots?.length ? data.slots : prev.slots,
         ingredients: data.ingredients,
         steps: data.steps,
+      }));
+      setGenerateName('');
+    } catch {
+      alert('No se pudo generar la receta. Comprueba que GEMINI_API_KEY está configurada en Vercel.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleImportUrl = async () => {
+    if (!importUrl.trim()) return;
+    setImporting('fetch');
+    try {
+      const data = await importRecipeFromUrl(importUrl.trim());
+
+      // ── Step 2: normalise with AI ────────────────────────────────
+      setImporting('ai');
+      let ingredients = data.ingredients;
+      let steps = data.steps;
+      try {
+        const aiRes = await fetch('/api/normalize-recipe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: data.name, ingredients, steps }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (aiRes.ok) {
+          const normalized = await aiRes.json();
+          if (normalized.ingredients?.length) {
+            ingredients = normalized.ingredients.map((i, idx) => ({ ...i, _id: idx }));
+          }
+          if (normalized.steps?.length) steps = normalized.steps;
+        }
+      } catch {} // AI failure is silent — use raw data
+
+      setForm(prev => ({
+        ...prev,
+        name: data.name || prev.name,
+        time: data.time || prev.time,
+        ingredients,
+        steps,
       }));
       setImportUrl('');
     } catch (e) {
       const msg = e.message === 'no_recipe'
-        ? 'La web no tiene los datos estructurados necesarios.\n\nPrueba con: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net, cookpad.com'
-        : 'No se pudo acceder a la URL. La web puede bloquear el acceso automático.\n\nPrueba con: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net';
+        ? 'La web no tiene datos de receta estructurados.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net, cookpad.com'
+        : 'No se pudo obtener la receta. Comprueba que la URL es correcta.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net';
       alert(msg);
     } finally {
       setImporting(false);
@@ -950,10 +1109,45 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
       <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:540,
         boxShadow:'0 -8px 40px rgba(0,0,0,0.25)', display:'flex', flexDirection:'column', maxHeight:'92vh' }}>
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid #ebebeb', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
-          <div style={{ fontWeight:700, fontSize:16, color:'#111111' }}>{isNew ? '✨ Nueva receta' : '✏️ Editar receta'}</div>
+          <div style={{ fontWeight:700, fontSize:16, color:'#111111' }}>
+            {isNew ? '✨ Nueva receta' : isOverride ? '📅 Editar para esta semana' : '✏️ Editar receta'}
+          </div>
           <button onClick={onClose} style={{ border:'1px solid #ebebeb', background:'white', cursor:'pointer', padding:8, borderRadius:8, color:'#888888' }}><X size={16} /></button>
         </div>
         <div style={{ overflowY:'auto', flex:1, padding:'16px 20px 24px' }}>
+          {/* ── Override banner ── */}
+          {isOverride && (
+            <div style={{ marginBottom:14, padding:'10px 12px', background:'#fef3c7', borderRadius:10,
+              border:'1px solid #fcd34d', fontSize:12, color:'#92400e', lineHeight:1.5 }}>
+              <strong>📅 Solo para esta semana</strong> — Los cambios no modifican la receta original.
+              Solo los ingredientes afectan a la lista de la compra de esta semana.
+            </div>
+          )}
+          {/* ── Generar con IA ── */}
+          {isNew && (
+            <div style={{ marginBottom:12, padding:12, background:'#faf5ff', borderRadius:12, border:'1px solid #e9d5ff' }}>
+              <label style={{ ...labelStyle, color:'#7c3aed' }}>✨ Generar receta con IA</label>
+              <div style={{ display:'flex', gap:6 }}>
+                <input value={generateName} onChange={e => setGenerateName(e.target.value)}
+                  placeholder={form.name || 'Ej: Paella valenciana, Lentejas con chorizo…'}
+                  onKeyDown={e => e.key === 'Enter' && handleGenerate()}
+                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#d8b4fe' }} />
+                <button onClick={handleGenerate} disabled={generating}
+                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
+                    background: generating ? '#d8b4fe' : '#7c3aed',
+                    color:'white', fontSize:12, fontWeight:700,
+                    cursor: generating ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
+                  {generating ? '✨ Generando…' : '✨ Generar'}
+                </button>
+              </div>
+              <div style={{ fontSize:10, color:'#7c3aed', marginTop:5 }}>
+                {generating
+                  ? 'La IA está creando ingredientes y pasos…'
+                  : 'Escribe el nombre del plato y la IA rellena todo el formulario'}
+              </div>
+            </div>
+          )}
+
           {/* ── Importar desde URL ── */}
           {isNew && (
             <div style={{ marginBottom:16, padding:12, background:'#f0fdf4', borderRadius:12, border:'1px solid #bbf7d0' }}>
@@ -963,15 +1157,26 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
                   placeholder="https://www.allrecipes.com/recipe/..."
                   onKeyDown={e => e.key === 'Enter' && handleImportUrl()}
                   style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#86efac' }} />
-                <button onClick={handleImportUrl} disabled={importing || !importUrl.trim()}
-                  style={{ padding:'8px 14px', borderRadius:999, border:'none', background: importing ? '#86efac' : '#16a34a',
-                    color:'white', fontSize:12, fontWeight:700, cursor: importing ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-                  {importing ? '⏳' : '↓ Importar'}
+                <button onClick={handleImportUrl} disabled={!!importing || !importUrl.trim()}
+                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
+                    background: importing ? '#86efac' : '#16a34a',
+                    color:'white', fontSize:12, fontWeight:700,
+                    cursor: importing ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
+                  {importing === 'fetch' ? '⏳ Descargando…'
+                    : importing === 'ai' ? '✨ Mejorando…'
+                    : '↓ Importar'}
                 </button>
               </div>
-              <div style={{ fontSize:10, color:'#16a34a', marginTop:5 }}>
-                Pega un enlace de AllRecipes, BBC Good Food, Recetas.com y rellena automáticamente
-              </div>
+              {importing === 'ai' && (
+                <div style={{ fontSize:10, color:'#15803d', marginTop:5, fontWeight:600 }}>
+                  ✨ Normalizando ingredientes y pasos con IA…
+                </div>
+              )}
+              {!importing && (
+                <div style={{ fontSize:10, color:'#16a34a', marginTop:5 }}>
+                  Pega un enlace de AllRecipes, BBC Good Food, Recetas.com… la IA normaliza el resultado
+                </div>
+              )}
             </div>
           )}
           <div style={{ marginBottom:16 }}>
@@ -1079,7 +1284,7 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
           </button>
           <button onClick={handleSave}
             style={{ flex:2, padding:'10px', borderRadius:10, fontSize:13, border:'none', background:'#f59e0b', color:'white', cursor:'pointer', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-            <Save size={14}/> {isNew ? 'Crear receta' : 'Guardar cambios'}
+            <Save size={14}/> {isNew ? 'Crear receta' : isOverride ? 'Guardar para esta semana' : 'Guardar cambios'}
           </button>
         </div>
       </div>
@@ -1316,11 +1521,14 @@ export default function App() {
   const [weekKey, setWeekKey]           = useState(() => getWeekKey(new Date()));
   const [activeSlot, setActiveSlot]     = useState(null);
   const [recipeModal, setRecipeModal]   = useState(null);
+  const [recipeModalCtx, setRecipeModalCtx] = useState(null); // {day, slotKey} when opened from board
   const [recipeEditor, setRecipeEditor] = useState(null); // null=cerrado, false=nueva, obj=editar
+  const [overrideCtx, setOverrideCtx]   = useState(null); // {day, slotKey, recipeId} when editing override
   const [mobileTab, setMobileTab]       = useState('board');
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
   const [dbSyncing, setDbSyncing]       = useState(true);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [selectedDay, setSelectedDay]   = useState(() => {
     const jsDay = new Date().getDay();
     const idx = jsDay === 0 ? 6 : jsDay - 1; // Sun→6, Mon→0
@@ -1391,6 +1599,22 @@ export default function App() {
     }
   }, [recipes]);
 
+  // ── Detección de nueva versión via Service Worker ─────────────
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready.then(reg => {
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            setUpdateAvailable(true);
+          }
+        });
+      });
+    });
+  }, []);
+
   const shoppingList = useMemo(() => {
     const raw = {};
     DAYS.forEach(day => {
@@ -1398,7 +1622,10 @@ export default function App() {
         const rid = menu[day]?.[key];
         if (!rid || rid === '__fuera__') return;
         const rec = recipes.find(r => r.id === rid); if (!rec) return;
-        rec.ingredients.forEach(ing => {
+        // Use weekly override ingredients if they exist for this recipe+slot
+        const ov = menu._overrides?.[`${day}_${key}`];
+        const ingredients = (ov?.recipeId === rid) ? ov.ingredients : rec.ingredients;
+        ingredients.forEach(ing => {
           const nameKey = ing.name.trim().toLowerCase();
           if (!raw[nameKey]) raw[nameKey] = { name: ing.name, amounts: [] };
           raw[nameKey].amounts.push(ing.amount);
@@ -1408,7 +1635,7 @@ export default function App() {
     return Object.values(raw).map(({ name, amounts }) => ({ k: name.toLowerCase(), name, amount: mergeAmounts(amounts) }));
   }, [menu, recipes]);
 
-  const totalPlatos    = Object.values(menu).reduce((a, d) => a + Object.values(d).filter(Boolean).length, 0);
+  const totalPlatos = DAYS.reduce((a, day) => a + SLOTS.filter(({key}) => menu[day]?.[key]).length, 0);
   const uncheckedCount = shoppingList.filter(i => !checked.has(i.k)).length;
 
   // ── Sugerencias inteligentes ──────────────────────────────────
@@ -1445,6 +1672,19 @@ export default function App() {
       [...prev].forEach(k => { if (!validKeys.has(k)) next.delete(k); });
       return next;
     });
+  };
+
+  const handleSaveOverride = (modifiedRecipe) => {
+    const { day, slotKey, recipeId } = overrideCtx;
+    setMenu(prev => ({
+      ...prev,
+      _overrides: {
+        ...(prev._overrides || {}),
+        [`${day}_${slotKey}`]: { recipeId, ingredients: modifiedRecipe.ingredients },
+      },
+    }));
+    setOverrideCtx(null);
+    setRecipeEditor(null);
   };
 
   const handleSaveRecipe = (recipe) => {
@@ -1493,7 +1733,7 @@ export default function App() {
                 <div className="header-subtitle">
                   {dbSyncing
                     ? '⏳ Sincronizando…'
-                    : `${totalPlatos}/${DAYS.length * 3} platos planificados`}
+                    : `${totalPlatos}/${DAYS.length * 3} platos · v${APP_VERSION}`}
                 </div>
               </div>
             </div>
@@ -1601,9 +1841,10 @@ export default function App() {
                     </div>
                     <PostItSlot slotKey={key}
                       menuVal={menu[selectedDay]?.[key]} recipes={recipes}
+                      hasOverride={menu._overrides?.[`${selectedDay}_${key}`]?.recipeId === menu[selectedDay]?.[key]}
                       onSlotClick={() => { setDrawerFilter('all'); setActiveSlot({ day:selectedDay, slotKey:key }); }}
                       onRemove={() => setMenu(p => ({ ...p, [selectedDay]:{ ...p[selectedDay], [key]:null } }))}
-                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                      onViewRecipe={(rid, sk) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: selectedDay, slotKey: sk }); } }} />
                   </div>
                 ))}
               </div>
@@ -1627,9 +1868,10 @@ export default function App() {
                     <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
                       menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
                       recipes={recipes}
+                      overrides={menu._overrides}
                       onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
                       onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
-                      onViewRecipe={rid => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) setRecipeModal(r); }} />
+                      onViewRecipe={(rid, sk, d) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: d, slotKey: sk }); } }} />
                   ))}
                 </div>
               </div>
@@ -1648,6 +1890,19 @@ export default function App() {
                 onClearChecked={() => setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; })} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* BANNER NUEVA VERSIÓN */}
+      {updateAvailable && (
+        <div className="update-banner">
+          <span>🎉 Nueva versión disponible</span>
+          <button className="update-reload-btn" onClick={() => window.location.reload()}>
+            Actualizar
+          </button>
+          <button className="update-close-btn" onClick={() => setUpdateAvailable(false)}>
+            <X size={14}/>
+          </button>
         </div>
       )}
 
@@ -1678,18 +1933,25 @@ export default function App() {
 
       {/* MODAL RECETA */}
       {recipeModal && (
-        <RecipeModal recipe={recipeModal} onClose={() => setRecipeModal(null)}
+        <RecipeModal recipe={recipeModal} onClose={() => { setRecipeModal(null); setRecipeModalCtx(null); }}
           onUpdateIngredients={handleUpdateIngredients}
-          onEdit={r => { setRecipeModal(null); setRecipeEditor(r); }} />
+          onEdit={r => { setRecipeModal(null); setRecipeModalCtx(null); setRecipeEditor(r); }}
+          weekContext={recipeModalCtx}
+          onEditWeek={(r, ctx) => {
+            setRecipeModal(null);
+            setOverrideCtx({ day: ctx.day, slotKey: ctx.slotKey, recipeId: r.id });
+            setRecipeEditor(r);
+          }} />
       )}
 
       {/* EDITOR RECETA */}
       {recipeEditor !== null && (
         <RecipeEditor
           recipe={recipeEditor || null}
-          onSave={handleSaveRecipe}
-          onDelete={handleDeleteRecipe}
-          onClose={() => setRecipeEditor(null)} />
+          isOverride={!!overrideCtx}
+          onSave={overrideCtx ? handleSaveOverride : handleSaveRecipe}
+          onDelete={overrideCtx ? null : handleDeleteRecipe}
+          onClose={() => { setRecipeEditor(null); setOverrideCtx(null); }} />
       )}
 
       <style>{`
@@ -1856,6 +2118,28 @@ export default function App() {
         /* ── Mobile board: hidden on desktop ──────── */
         .mobile-board { display: none; }
         .desktop-board { display: block; }
+
+        /* ── Update banner ─────────────────────────── */
+        .update-banner {
+          position: fixed; bottom: 0; left: 0; right: 0;
+          background: #1d4ed8; color: #fff;
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px 16px;
+          padding-bottom: calc(10px + env(safe-area-inset-bottom));
+          z-index: 200; font-size: 14px; font-weight: 600;
+          box-shadow: 0 -4px 20px rgba(0,0,0,0.18);
+        }
+        .update-banner span { flex: 1; }
+        .update-reload-btn {
+          background: #fff; color: #1d4ed8;
+          border: none; border-radius: 999px;
+          padding: 5px 14px; font-size: 13px; font-weight: 700;
+          cursor: pointer;
+        }
+        .update-close-btn {
+          background: none; border: none; color: rgba(255,255,255,0.8);
+          cursor: pointer; padding: 4px; display: flex; align-items: center;
+        }
 
         /* ── Bottom Nav (mobile only) ──────────────── */
         .bottom-nav { display: none; }

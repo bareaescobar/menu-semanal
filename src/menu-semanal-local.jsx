@@ -258,7 +258,125 @@ function mergeAmounts(amounts) {
   return amounts.join(' + ');
 }
 
-// ── PostItSlot ────────────────────────────────────────────────────
+// ── Categorización de ingredientes para lista de compra ───────────
+const INGREDIENT_CATEGORIES = [
+  { label:'🥬 Frutas y verduras', color:'#dcfce7', textColor:'#15803d', keywords:['lechuga','tomate','pepino','cebolla','ajo','pimiento','calabacín','zanahoria','brócoli','espinaca','aguacate','limón','lima','naranja','manzana','pera','fresa','uva','puerro','patata','batata','berenjena','alcachofa','apio','perejil','cilantro','cebolleta','rúcula','albahaca','jengibre','champiñón','seta','judía verde','guisante','maíz','remolacha','hinojo','col','coliflor','mango','plátano','kiwi','melocotón','sandía','melón','cereza','frambuesa','arándano','granada','higo','cebollino','puerro','nabo','rábano'] },
+  { label:'🥩 Carnes', color:'#fee2e2', textColor:'#b91c1c', keywords:['pollo','pechuga','contramuslo','muslo','ternera','cerdo','pavo','jamón','chorizo','salchicha','bacon','lomo','carne picada','conejo','cordero','buey','costilla','solomillo','entrecot','pato','morcilla','butifarra'] },
+  { label:'🐟 Pescados y mariscos', color:'#dbeafe', textColor:'#1d4ed8', keywords:['salmón','merluza','dorada','lubina','atún','bacalao','rodaballo','sardina','boquerón','gamba','langostino','mejillón','sepia','calamar','pulpo','rape','pez espada','trucha','caballa','anchoa','berberecho','almeja','lenguado','fletán'] },
+  { label:'🥛 Lácteos y huevos', color:'#fef9c3', textColor:'#a16207', keywords:['huevo','leche','queso','yogur','nata','mantequilla','feta','parmesano','mozzarella','ricotta','brie','gouda','manchego','crema','kéfir','clara','yema'] },
+  { label:'🌾 Legumbres y cereales', color:'#ffedd5', textColor:'#c2410c', keywords:['garbanzo','lenteja','judía','alubia','arroz','pasta','quinoa','bulgur','pan','harina','avena','cuscús','espagueti','macarrón','fideos','sémola','polenta','trigo','centeno','cebada','maíz molido'] },
+  { label:'🥫 Despensa', color:'#f3f4f6', textColor:'#374151', keywords:['aceite','vinagre','sal','azúcar','comino','pimentón','cúrcuma','curry','orégano','tomillo','romero','laurel','pimienta','canela','caldo','tomate triturado','tahini','soja','miel','mostaza','especias','condimento','conserva','lata','bote','salsa','concentrado','maicena','levadura'] },
+  { label:'🥜 Frutos secos', color:'#fdf4ff', textColor:'#a21caf', keywords:['nuez','almendra','piñon','pistacho','avellana','anacardo','semilla','sésamo','lino','chía','girasol','cacahuete','coco','pasas','dátil'] },
+];
+
+function categorizeIngredient(name) {
+  const n = name.toLowerCase();
+  for (const cat of INGREDIENT_CATEGORIES) {
+    if (cat.keywords.some(kw => n.includes(kw))) return cat;
+  }
+  return { label:'🛒 Otros', color:'#f9fafb', textColor:'#6b7280' };
+}
+
+// ── Tabla nutricional (por 100g) [cal, prot, carbs, grasa] ────────
+const NUTRITION_TABLE = {
+  'pollo':           [165,31,0,3.6],  'pechuga':         [165,31,0,3.6],
+  'contramuslo':     [200,26,0,11],   'pavo':            [135,29,0,1],
+  'ternera':         [250,26,0,15],   'cerdo':           [242,27,0,14],
+  'jamón':           [145,21,1,6],    'salmón':          [208,20,0,13],
+  'merluza':         [82,18,0,1],     'atún':            [144,23,0,5],
+  'bacalao':         [82,18,0,1],     'dorada':          [96,20,0,2],
+  'lubina':          [97,19,0,2],     'gamba':           [99,21,0,1.5],
+  'huevo':           [143,13,1,10],   'leche':           [42,3.4,5,1],
+  'queso':           [350,25,2,28],   'yogur':           [59,10,3.6,0.4],
+  'nata':            [195,2,3,20],    'mantequilla':     [717,1,0,81],
+  'garbanzo':        [164,9,27,2.6],  'lenteja':         [116,9,20,0.4],
+  'arroz':           [130,2.7,28,0.3],'pasta':           [131,5,25,1.1],
+  'patata':          [77,2,17,0.1],   'boniato':         [86,1.6,20,0.1],
+  'tomate':          [18,0.9,3.9,0.2],'cebolla':         [40,1.1,9.3,0.1],
+  'zanahoria':       [41,0.9,10,0.2], 'pimiento':        [31,1,6,0.3],
+  'calabacín':       [17,1.2,3.1,0.3],'brócoli':         [34,2.8,6.6,0.4],
+  'espinaca':        [23,2.9,3.6,0.4],'lechuga':         [15,1.4,2.9,0.2],
+  'berenjena':       [25,1,5.9,0.2],  'champiñón':       [22,3.1,3.3,0.3],
+  'aguacate':        [160,2,9,15],    'aceite':          [884,0,0,100],
+  'pan':             [265,9,49,3.2],  'harina':          [364,10,76,1],
+};
+
+function parseGrams(amount) {
+  if (!amount) return null;
+  const a = amount.toLowerCase().trim();
+  if (a === 'al gusto') return 5;
+  const g = a.match(/^([\d.]+)\s*(?:g|gr|gramos?)$/);  if (g) return parseFloat(g[1]);
+  const kg = a.match(/^([\d.]+)\s*kg?$/); if (kg) return parseFloat(kg[1]) * 1000;
+  const ml = a.match(/^([\d.]+)\s*ml?$/); if (ml) return parseFloat(ml[1]);
+  const ud = a.match(/^([\d.]+)\s*(?:ud|unidad|pieza)/); if (ud) return parseFloat(ud[1]) * 100;
+  const cda = a.match(/^([\d.]+)\s*cda/); if (cda) return parseFloat(cda[1]) * 15;
+  const cdta = a.match(/^([\d.]+)\s*cdta/); if (cdta) return parseFloat(cdta[1]) * 5;
+  const diente = a.match(/^([\d.]+)\s*diente/); if (diente) return parseFloat(diente[1]) * 3;
+  const num = a.match(/^([\d.]+)$/); if (num) return parseFloat(num[1]) * 100;
+  return null;
+}
+
+function calcNutrition(ingredients) {
+  let cal = 0, prot = 0, carbs = 0, fat = 0, found = 0;
+  for (const ing of ingredients) {
+    const grams = parseGrams(ing.amount);
+    if (!grams) continue;
+    const key = Object.keys(NUTRITION_TABLE).find(k => ing.name.toLowerCase().includes(k));
+    if (!key) continue;
+    const [c,p,ch,f] = NUTRITION_TABLE[key];
+    cal += c*grams/100; prot += p*grams/100; carbs += ch*grams/100; fat += f*grams/100;
+    found++;
+  }
+  if (!found) return null;
+  return { cal: Math.round(cal), prot: Math.round(prot), carbs: Math.round(carbs), fat: Math.round(fat) };
+}
+
+// ── Importar receta desde URL (JSON-LD / schema.org/Recipe) ───────
+function parseISODuration(d) {
+  if (!d) return null;
+  const m = d.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+  if (!m) return null;
+  return (parseInt(m[1]||0) * 60) + parseInt(m[2]||0);
+}
+
+async function importRecipeFromUrl(url) {
+  const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+  const html = await fetch(proxy).then(r => { if (!r.ok) throw new Error('fetch'); return r.text(); });
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  let recipeData = null;
+  for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      const raw = JSON.parse(script.textContent);
+      const find = obj => {
+        if (!obj) return null;
+        if (obj['@type'] === 'Recipe') return obj;
+        if (Array.isArray(obj)) { for (const i of obj) { const r = find(i); if (r) return r; } }
+        if (obj['@graph']) return find(obj['@graph']);
+        return null;
+      };
+      recipeData = find(raw);
+      if (recipeData) break;
+    } catch {}
+  }
+  if (!recipeData) throw new Error('no_recipe');
+
+  const name = recipeData.name || '';
+  const time = parseISODuration(recipeData.cookTime || recipeData.totalTime) || 30;
+  const ingredients = (recipeData.recipeIngredient || []).map((ing, _id) => {
+    const m = ing.match(/^([\d½¼¾\/\s]+(?:g|kg|ml|l|ud|cdas?|cdtas?|taza|vaso|pizca|diente|manojo|rama|lata|bote)?(?:\s+de)?)\s+(.+)/i);
+    return m ? { name: m[2].trim(), amount: m[1].trim(), _id } : { name: ing.trim(), amount: '', _id };
+  });
+  const steps = [];
+  const instr = recipeData.recipeInstructions || [];
+  (Array.isArray(instr) ? instr : [instr]).forEach(i => {
+    if (typeof i === 'string') steps.push(i);
+    else if (i.text) steps.push(i.text);
+    else if (i.itemListElement) i.itemListElement.forEach(x => x.text && steps.push(x.text));
+  });
+  return { name, time, ingredients: ingredients.length ? ingredients : [{ name:'', amount:'', _id:0 }], steps: steps.length ? steps : [''] };
+}
+
+
 function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRecipe }) {
   const [hover, setHover] = useState(false);
   const [btnHover, setBtnHover] = useState(false);
@@ -411,6 +529,14 @@ function ShoppingList({ items, checked, onToggle, onClearChecked, weekKey }) {
   const pending = items.filter(i => !checked.has(i.k));
   const done    = items.filter(i =>  checked.has(i.k));
 
+  // Agrupar pendientes por sección
+  const grouped = pending.reduce((acc, item) => {
+    const cat = categorizeIngredient(item.name);
+    if (!acc[cat.label]) acc[cat.label] = { cat, items: [] };
+    acc[cat.label].items.push(item);
+    return acc;
+  }, {});
+
   const buildText = () => {
     const header = `🛒 Lista de la compra — semana del ${weekLabel(weekKey)}\n`;
     const lines = pending.map(i => `• ${i.name}  ${i.amount}`).join('\n');
@@ -480,7 +606,15 @@ function ShoppingList({ items, checked, onToggle, onClearChecked, weekKey }) {
         </div>
       ) : (
         <div style={{ overflowY:'auto', maxHeight:'60vh' }}>
-          {pending.map(item => <Row key={item.k} item={item} crossed={false} />)}
+          {Object.values(grouped).map(({ cat, items: sectionItems }) => (
+            <div key={cat.label} style={{ marginBottom: 10 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 8px 4px',
+                background: cat.color, borderRadius: 8, marginBottom: 2 }}>
+                <span style={{ fontSize:11, fontWeight:700, color: cat.textColor, letterSpacing:'0.04em' }}>{cat.label}</span>
+              </div>
+              {sectionItems.map(item => <Row key={item.k} item={item} crossed={false} />)}
+            </div>
+          ))}
           {done.length > 0 && (
             <>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 8px 4px',
@@ -666,6 +800,26 @@ function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit }) {
               </>
             )}
           </div>
+          {/* ── Info nutricional ── */}
+          {(() => {
+            const n = calcNutrition(localIngs);
+            if (!n) return null;
+            return (
+              <div style={{ margin:'0 20px 4px', padding:'10px 14px', background:'#f0fdf4', borderRadius:12, border:'1px solid #bbf7d0' }}>
+                <div style={{ fontSize:10, fontWeight:700, color:'#15803d', letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:8 }}>📊 Valor nutricional aprox. (receta completa)</div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6 }}>
+                  {[['🔥','Calorías',n.cal,'kcal'],['💪','Proteínas',n.prot,'g'],['🌾','Hidratos',n.carbs,'g'],['🫒','Grasas',n.fat,'g']].map(([icon,label,val,unit]) => (
+                    <div key={label} style={{ textAlign:'center', padding:'6px 4px', background:'white', borderRadius:8 }}>
+                      <div style={{ fontSize:14 }}>{icon}</div>
+                      <div style={{ fontSize:13, fontWeight:700, color:'#1c1c1e' }}>{val}</div>
+                      <div style={{ fontSize:9, color:'#aeaeb2', fontWeight:600 }}>{unit}</div>
+                      <div style={{ fontSize:9, color:'#aeaeb2' }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ padding:'12px 20px 28px' }}>
             <div style={{ fontSize:10, fontWeight:700, color:'#9ca3af', letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:12 }}>👩‍🍳 Preparación</div>
             {recipe.steps.map((step, i) => (
@@ -699,6 +853,28 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
     ? { ...recipe, ingredients: recipe.ingredients.map((i,idx)=>({...i,_id:idx})), steps:[...recipe.steps] }
     : BLANK_RECIPE()
   );
+  const [importUrl, setImportUrl] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  const handleImportUrl = async () => {
+    if (!importUrl.trim()) return;
+    setImporting(true);
+    try {
+      const data = await importRecipeFromUrl(importUrl.trim());
+      setForm(prev => ({
+        ...prev,
+        name: data.name || prev.name,
+        time: data.time || prev.time,
+        ingredients: data.ingredients,
+        steps: data.steps,
+      }));
+      setImportUrl('');
+    } catch {
+      alert('No se pudo extraer la receta. Asegúrate de que la URL es de una web de recetas conocida (ej: allrecipes.com, recetas.com, etc.)');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const set = (field, val) => setForm(p => ({ ...p, [field]: val }));
 
@@ -736,6 +912,26 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
           <button onClick={onClose} style={{ border:'1px solid #ebebeb', background:'white', cursor:'pointer', padding:8, borderRadius:8, color:'#888888' }}><X size={16} /></button>
         </div>
         <div style={{ overflowY:'auto', flex:1, padding:'16px 20px 24px' }}>
+          {/* ── Importar desde URL ── */}
+          {isNew && (
+            <div style={{ marginBottom:16, padding:12, background:'#f0fdf4', borderRadius:12, border:'1px solid #bbf7d0' }}>
+              <label style={{ ...labelStyle, color:'#15803d' }}>🔗 Importar desde URL (opcional)</label>
+              <div style={{ display:'flex', gap:6 }}>
+                <input value={importUrl} onChange={e=>setImportUrl(e.target.value)}
+                  placeholder="https://www.allrecipes.com/recipe/..."
+                  onKeyDown={e => e.key === 'Enter' && handleImportUrl()}
+                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#86efac' }} />
+                <button onClick={handleImportUrl} disabled={importing || !importUrl.trim()}
+                  style={{ padding:'8px 14px', borderRadius:999, border:'none', background: importing ? '#86efac' : '#16a34a',
+                    color:'white', fontSize:12, fontWeight:700, cursor: importing ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
+                  {importing ? '⏳' : '↓ Importar'}
+                </button>
+              </div>
+              <div style={{ fontSize:10, color:'#16a34a', marginTop:5 }}>
+                Pega un enlace de AllRecipes, BBC Good Food, Recetas.com y rellena automáticamente
+              </div>
+            </div>
+          )}
           <div style={{ marginBottom:16 }}>
             <label style={labelStyle}>Nombre del plato</label>
             <input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Ej: Merluza al limón con alcaparras"
@@ -1173,6 +1369,32 @@ export default function App() {
   const totalPlatos    = Object.values(menu).reduce((a, d) => a + Object.values(d).filter(Boolean).length, 0);
   const uncheckedCount = shoppingList.filter(i => !checked.has(i.k)).length;
 
+  // ── Sugerencias inteligentes ──────────────────────────────────
+  const weekSuggestions = useMemo(() => {
+    const tips = [];
+    // Recetas repetidas
+    const count = {};
+    DAYS.forEach(d => SLOTS.forEach(({key}) => {
+      const rid = menu[d]?.[key];
+      if (rid && rid !== '__fuera__') count[rid] = (count[rid]||0) + 1;
+    }));
+    Object.entries(count).forEach(([rid, n]) => {
+      if (n > 1) {
+        const r = recipes.find(x => x.id === rid);
+        if (r) tips.push({ icon:'🔁', msg:`"${r.name}" aparece ${n} veces esta semana` });
+      }
+    });
+    // Misma proteína dos días seguidos
+    const PROTEINS = ['carne','pescado'];
+    for (let i = 0; i < DAYS.length - 1; i++) {
+      const p1 = SLOTS.map(({key}) => { const r = recipes.find(x => x.id === menu[DAYS[i]]?.[key]); return r && PROTEINS.includes(r.type) ? r.type : null; }).filter(Boolean);
+      const p2 = SLOTS.map(({key}) => { const r = recipes.find(x => x.id === menu[DAYS[i+1]]?.[key]); return r && PROTEINS.includes(r.type) ? r.type : null; }).filter(Boolean);
+      const rep = p1.find(p => p2.includes(p));
+      if (rep) tips.push({ icon:'🌈', msg:`${DAYS[i]} y ${DAYS[i+1]}: ${rep === 'carne' ? 'carne' : 'pescado'} dos días seguidos` });
+    }
+    return tips;
+  }, [menu, recipes]);
+
   const handleUpdateIngredients = (recipeId, newIngredients) => {
     setRecipes(prev => prev.map(r => r.id === recipeId ? { ...r, ingredients: newIngredients } : r));
     setChecked(prev => {
@@ -1295,6 +1517,17 @@ export default function App() {
 
             {/* ── MÓVIL: selector de días + vista de un día ── */}
             <div className="mobile-board">
+              {/* Sugerencias inteligentes */}
+              {weekSuggestions.length > 0 && (
+                <div style={{ marginBottom:12, display:'flex', flexDirection:'column', gap:6 }}>
+                  {weekSuggestions.map((s, i) => (
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
+                      background:'#fffbeb', borderRadius:10, border:'1px solid #fde68a', fontSize:12, color:'#92400e', fontWeight:500 }}>
+                      <span style={{ fontSize:14 }}>{s.icon}</span><span>{s.msg}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* Pills de días */}
               <div className="day-pills-row">
                 {DAYS.map((day, di) => {
@@ -1336,6 +1569,16 @@ export default function App() {
 
             {/* ── DESKTOP: todos los días en scroll horizontal ── */}
             <div className="desktop-board">
+              {weekSuggestions.length > 0 && (
+                <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12 }}>
+                  {weekSuggestions.map((s, i) => (
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px',
+                      background:'#fffbeb', borderRadius:999, border:'1px solid #fde68a', fontSize:11, color:'#92400e', fontWeight:600 }}>
+                      <span>{s.icon}</span><span>{s.msg}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div style={{ overflowX:'auto', paddingBottom:8, WebkitOverflowScrolling:'touch' }}>
                 <div style={{ display:'flex', gap:10, minWidth:'max-content' }}>
                   {DAYS.map((day, di) => (

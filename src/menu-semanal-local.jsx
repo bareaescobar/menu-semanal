@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -340,80 +340,138 @@ function parseISODuration(d) {
   return (parseInt(m[1]||0) * 60) + parseInt(m[2]||0);
 }
 
-async function importRecipeFromUrl(url) {
-  // Intentar varios proxies CORS en cascada
-  const proxies = [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    `https://corsproxy.io/?${encodeURIComponent(url)}`,
-    `https://thingproxy.freeboard.io/fetch/${url}`,
-  ];
+// Fetch HTML through our Vercel serverless proxy (avoids CORS + gets proper server-side fetch)
+async function fetchViaProxy(url) {
+  const proxyUrl = `/api/fetch-recipe?url=${encodeURIComponent(url)}`;
+  const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`proxy_${r.status}`);
+  return r.text();
+}
 
-  let html = null;
-  for (const proxy of proxies) {
-    try {
-      const r = await fetch(proxy, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (r.ok) { html = await r.text(); break; }
-    } catch {}
+// Find a schema.org/Recipe node anywhere inside a parsed JSON-LD tree
+function findRecipeJsonLd(obj) {
+  if (!obj) return null;
+  if (obj['@type'] === 'Recipe') return obj;
+  if (Array.isArray(obj['@type']) && obj['@type'].includes('Recipe')) return obj;
+  if (Array.isArray(obj)) { for (const i of obj) { const r = findRecipeJsonLd(i); if (r) return r; } }
+  if (obj['@graph']) return findRecipeJsonLd(obj['@graph']);
+  return null;
+}
+
+// Parse an ingredient string into { name, amount }
+function parseIngredientLine(str) {
+  // Examples: "200 g de harina", "2 huevos", "1 taza de leche", "sal al gusto"
+  const m = str.match(/^([\d½¼¾⅓⅔,. \/]+\s*(?:g|kg|ml|l|cl|oz|lb|ud\.?|unidades?|cdas?\.?|cdtas?\.?|cucharadas?|cucharitas?|tazas?|vasos?|pizca|diente[s]?|manojo|rama[s]?|lata[s]?|bote[s]?|paquete[s]?|loncha[s]?|filete[s]?|trozo[s]?)?\s*(?:de\s+)?)/i);
+  if (m && m[1].trim()) {
+    return { name: str.slice(m[1].length).trim(), amount: m[1].trim() };
   }
-  if (!html) throw new Error('fetch');
+  return { name: str.trim(), amount: '' };
+}
+
+async function importRecipeFromUrl(url) {
+  let html;
+  try {
+    html = await fetchViaProxy(url);
+  } catch (e) {
+    throw new Error('fetch');
+  }
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
-  // 1. Buscar JSON-LD con schema.org/Recipe
+  // ── 1. JSON-LD (most reliable — used by allrecipes, bbcgoodfood, directoalpaladar, etc.) ──
   let recipeData = null;
   for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
     try {
-      const raw = JSON.parse(script.textContent);
-      const find = obj => {
-        if (!obj) return null;
-        if (obj['@type'] === 'Recipe') return obj;
-        if (Array.isArray(obj['@type']) && obj['@type'].includes('Recipe')) return obj;
-        if (Array.isArray(obj)) { for (const i of obj) { const r = find(i); if (r) return r; } }
-        if (obj['@graph']) return find(obj['@graph']);
-        return null;
-      };
-      recipeData = find(raw);
+      recipeData = findRecipeJsonLd(JSON.parse(script.textContent));
       if (recipeData) break;
     } catch {}
   }
 
-  // 2. Fallback: buscar microdata itemtype="Recipe"
+  // ── 2. Microdata fallback (some Spanish sites) ──
   if (!recipeData) {
-    const itemEl = doc.querySelector('[itemtype*="Recipe"]');
+    const itemEl = doc.querySelector('[itemtype*="schema.org/Recipe"]');
     if (itemEl) {
-      const getProp = (name) => {
+      const getProp = name => {
         const el = itemEl.querySelector(`[itemprop="${name}"]`);
         return el ? (el.getAttribute('content') || el.textContent.trim()) : '';
       };
-      const ingEls = itemEl.querySelectorAll('[itemprop="recipeIngredient"], [itemprop="ingredients"]');
-      const stepEls = itemEl.querySelectorAll('[itemprop="recipeInstructions"] [itemprop="text"], [itemprop="step"]');
+      const ingEls = itemEl.querySelectorAll('[itemprop="recipeIngredient"],[itemprop="ingredients"]');
+      const stepEls = itemEl.querySelectorAll('[itemprop="recipeInstructions"] [itemprop="text"],[itemprop="step"]');
       if (ingEls.length || stepEls.length) {
         recipeData = {
           name: getProp('name'),
-          cookTime: getProp('cookTime') || getProp('totalTime'),
-          recipeIngredient: [...ingEls].map(e => e.textContent.trim()),
-          recipeInstructions: [...stepEls].map(e => e.textContent.trim()),
+          totalTime: getProp('totalTime') || getProp('cookTime'),
+          recipeIngredient: [...ingEls].map(e => e.textContent.trim()).filter(Boolean),
+          recipeInstructions: [...stepEls].map(e => e.textContent.trim()).filter(Boolean),
         };
       }
     }
   }
 
+  // ── 3. Heuristic fallback: look for common HTML patterns ──
+  if (!recipeData) {
+    // Try to find name
+    const titleEl = doc.querySelector('h1.recipe-title, h1[class*="recipe"], h1[class*="titulo"], h1') ;
+    const name = titleEl ? titleEl.textContent.trim() : doc.title.replace(/\s*[-|].*$/, '').trim();
+
+    // Look for ingredient lists (common class names)
+    const ingSelectors = [
+      '.recipe-ingredients li', '.ingredients li', '[class*="ingredient"] li',
+      '[class*="ingrediente"] li', '.wprm-recipe-ingredient', '.tasty-recipe-ingredients li',
+    ];
+    let ingEls = [];
+    for (const sel of ingSelectors) {
+      ingEls = [...doc.querySelectorAll(sel)];
+      if (ingEls.length > 2) break;
+    }
+
+    // Look for steps
+    const stepSelectors = [
+      '.recipe-instructions li', '.instructions li', '[class*="instruction"] li',
+      '[class*="paso"] li', '[class*="step"] li', '.wprm-recipe-instruction',
+      '.tasty-recipe-instructions li',
+    ];
+    let stepEls = [];
+    for (const sel of stepSelectors) {
+      stepEls = [...doc.querySelectorAll(sel)];
+      if (stepEls.length > 1) break;
+    }
+
+    if (ingEls.length > 2 || stepEls.length > 1) {
+      recipeData = {
+        name,
+        totalTime: null,
+        recipeIngredient: ingEls.map(e => e.textContent.trim()).filter(Boolean),
+        recipeInstructions: stepEls.map(e => e.textContent.trim()).filter(Boolean),
+      };
+    }
+  }
+
   if (!recipeData) throw new Error('no_recipe');
 
-  const name = recipeData.name || '';
-  const time = parseISODuration(recipeData.cookTime || recipeData.totalTime) || 30;
-  const ingredients = (recipeData.recipeIngredient || []).map((ing, _id) => {
-    const m = ing.match(/^([\d½¼¾\/\s]+(?:g|kg|ml|l|ud|cdas?|cdtas?|taza|vaso|pizca|diente|manojo|rama|lata|bote)?(?:\s+de)?)\s+(.+)/i);
-    return m ? { name: m[2].trim(), amount: m[1].trim(), _id } : { name: ing.trim(), amount: '', _id };
-  });
+  // ── Build the result object ──
+  const name = (recipeData.name || '').replace(/<[^>]+>/g, '').trim();
+  const time = parseISODuration(recipeData.totalTime || recipeData.cookTime) || 30;
+
+  const ingredients = (recipeData.recipeIngredient || [])
+    .map(ing => ing.replace(/<[^>]+>/g, '').trim())
+    .filter(Boolean)
+    .map((ing, _id) => ({ ...parseIngredientLine(ing), _id }));
+
   const steps = [];
   const instr = recipeData.recipeInstructions || [];
   (Array.isArray(instr) ? instr : [instr]).forEach(i => {
-    if (typeof i === 'string') steps.push(i);
-    else if (i.text) steps.push(i.text);
-    else if (i.itemListElement) i.itemListElement.forEach(x => x.text && steps.push(x.text));
+    if (typeof i === 'string' && i.trim()) steps.push(i.trim());
+    else if (i && i.text) steps.push(i.text.trim());
+    else if (i && i.itemListElement) i.itemListElement.forEach(x => x.text && steps.push(x.text.trim()));
   });
-  return { name, time, ingredients: ingredients.length ? ingredients : [{ name:'', amount:'', _id:0 }], steps: steps.length ? steps : [''] };
+
+  return {
+    name,
+    time,
+    ingredients: ingredients.length ? ingredients : [{ name:'', amount:'', _id:0 }],
+    steps: steps.filter(Boolean).length ? steps.filter(Boolean) : [''],
+  };
 }
 
 
@@ -911,8 +969,8 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose }) {
       setImportUrl('');
     } catch (e) {
       const msg = e.message === 'no_recipe'
-        ? 'La web no tiene los datos estructurados necesarios.\n\nPrueba con: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net, cookpad.com'
-        : 'No se pudo acceder a la URL. La web puede bloquear el acceso automático.\n\nPrueba con: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net';
+        ? 'La web no tiene datos de receta estructurados.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net, cookpad.com'
+        : 'No se pudo obtener la receta. Comprueba que la URL es correcta.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net';
       alert(msg);
     } finally {
       setImporting(false);

@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.13.1';
+const APP_VERSION = '1.13.2';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -824,11 +824,10 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
             ) : (
               pantry.slice().reverse().map(pItem => (
                 <div key={pItem.id}
-                  style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:8 }}>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:500, color:'#374151' }}>{pItem.name}</div>
-                    {pItem.note && <div style={{ fontSize:11, color:'#9ca3af' }}>{pItem.note}</div>}
-                  </div>
+                  style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px', borderRadius:7 }}>
+                  <span style={{ flex:1, fontSize:13, fontWeight:500, color:'#374151', minWidth:0,
+                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pItem.name}</span>
+                  {pItem.note && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{pItem.note}</span>}
                   <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:6, flexShrink:0,
                     background: pItem.source === 'shop' ? '#dcfce7' : '#f3f4f6',
                     color: pItem.source === 'shop' ? '#16a34a' : '#6b7280' }}>

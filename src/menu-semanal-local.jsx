@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.13.4';
+const APP_VERSION = '1.14.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -803,11 +803,11 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
               <input value={newName} onChange={e => setNewName(e.target.value)}
                 placeholder="Nombre del alimento"
                 onKeyDown={e => { if (e.key === 'Enter') { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); } }}
-                style={{ flex:2, fontSize:13, padding:'8px 10px', border:'1px solid #ebebeb', borderRadius:8, outline:'none' }} />
+                style={{ flex:2, fontSize:13, padding:'8px 10px', border:'1px solid #ebebeb', borderRadius:8, outline:'none', background:'white', color:'#333333' }} />
               <input value={newNote} onChange={e => setNewNote(e.target.value)}
                 placeholder="Cantidad"
                 onKeyDown={e => { if (e.key === 'Enter') { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); } }}
-                style={{ flex:1, fontSize:13, padding:'8px 8px', border:'1px solid #ebebeb', borderRadius:8, outline:'none' }} />
+                style={{ flex:1, fontSize:13, padding:'8px 8px', border:'1px solid #ebebeb', borderRadius:8, outline:'none', background:'white', color:'#333333' }} />
               <button onClick={() => { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); }}
                 style={{ padding:'8px 14px', borderRadius:8, border:'none', background:'#f59e0b', color:'white', fontWeight:700, fontSize:15, cursor:'pointer', flexShrink:0 }}>
                 +
@@ -1197,84 +1197,66 @@ function RecipeEditor({ recipe, onSave, onSaveAsNew, onSaveToRecipeList, onDelet
     ? { ...recipe, ingredients: recipe.ingredients.map((i,idx)=>({...i,_id:idx})), steps:[...recipe.steps] }
     : BLANK_RECIPE()
   );
-  const [importUrl, setImportUrl] = useState('');
-  const [importing, setImporting] = useState(false); // 'fetch' | 'ai' | false
-  const [generating, setGenerating] = useState(false);
-  const [generateName, setGenerateName] = useState('');
+  const [smartInput, setSmartInput] = useState('');
+  const [aiStatus, setAiStatus] = useState(null); // null | 'fetch' | 'ai' | 'generating'
 
-  const handleGenerate = async () => {
-    const q = generateName.trim() || form.name.trim();
-    if (!q) { alert('Escribe primero el nombre del plato'); return; }
-    setGenerating(true);
-    try {
-      const res = await fetch('/api/generate-recipe', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: q }),
-        signal: AbortSignal.timeout(25000),
-      });
-      if (!res.ok) throw new Error('api_error');
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setForm(prev => ({
-        ...prev,
-        name: data.name || prev.name,
-        time: data.time || prev.time,
-        difficulty: data.difficulty || prev.difficulty,
-        type: data.type || prev.type,
-        slots: data.slots?.length ? data.slots : prev.slots,
-        ingredients: data.ingredients,
-        steps: data.steps,
-      }));
-      setGenerateName('');
-    } catch {
-      alert('No se pudo generar la receta. Comprueba que GEMINI_API_KEY está configurada en Vercel.');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleImportUrl = async () => {
-    if (!importUrl.trim()) return;
-    setImporting('fetch');
-    try {
-      const data = await importRecipeFromUrl(importUrl.trim());
-
-      // ── Step 2: normalise with AI ────────────────────────────────
-      setImporting('ai');
-      let ingredients = data.ingredients;
-      let steps = data.steps;
+  const handleSmartInput = async () => {
+    const val = smartInput.trim() || form.name.trim();
+    if (!val) { alert('Escribe una URL, el nombre del plato o una descripción'); return; }
+    const isUrl = /^https?:\/\//i.test(val);
+    if (isUrl) {
+      setAiStatus('fetch');
       try {
-        const aiRes = await fetch('/api/normalize-recipe', {
+        const data = await importRecipeFromUrl(val);
+        setAiStatus('ai');
+        let ingredients = data.ingredients;
+        let steps = data.steps;
+        try {
+          const aiRes = await fetch('/api/normalize-recipe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: data.name, ingredients, steps }),
+            signal: AbortSignal.timeout(20000),
+          });
+          if (aiRes.ok) {
+            const normalized = await aiRes.json();
+            if (normalized.ingredients?.length) ingredients = normalized.ingredients.map((i, idx) => ({ ...i, _id: idx }));
+            if (normalized.steps?.length) steps = normalized.steps;
+          }
+        } catch {}
+        setForm(prev => ({ ...prev, name: data.name || prev.name, time: data.time || prev.time, ingredients, steps }));
+        setSmartInput('');
+      } catch (e) {
+        alert(e.message === 'no_recipe'
+          ? 'La web no tiene datos de receta estructurados.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net'
+          : 'No se pudo obtener la receta. Comprueba que la URL es correcta.');
+      } finally { setAiStatus(null); }
+    } else {
+      setAiStatus('generating');
+      try {
+        const res = await fetch('/api/generate-recipe', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: data.name, ingredients, steps }),
-          signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({ name: val }),
+          signal: AbortSignal.timeout(25000),
         });
-        if (aiRes.ok) {
-          const normalized = await aiRes.json();
-          if (normalized.ingredients?.length) {
-            ingredients = normalized.ingredients.map((i, idx) => ({ ...i, _id: idx }));
-          }
-          if (normalized.steps?.length) steps = normalized.steps;
-        }
-      } catch {} // AI failure is silent — use raw data
-
-      setForm(prev => ({
-        ...prev,
-        name: data.name || prev.name,
-        time: data.time || prev.time,
-        ingredients,
-        steps,
-      }));
-      setImportUrl('');
-    } catch (e) {
-      const msg = e.message === 'no_recipe'
-        ? 'La web no tiene datos de receta estructurados.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net, cookpad.com'
-        : 'No se pudo obtener la receta. Comprueba que la URL es correcta.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net';
-      alert(msg);
-    } finally {
-      setImporting(false);
+        if (!res.ok) throw new Error('api_error');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        setForm(prev => ({
+          ...prev,
+          name: data.name || prev.name,
+          time: data.time || prev.time,
+          difficulty: data.difficulty || prev.difficulty,
+          type: data.type || prev.type,
+          slots: data.slots?.length ? data.slots : prev.slots,
+          ingredients: data.ingredients,
+          steps: data.steps,
+        }));
+        setSmartInput('');
+      } catch {
+        alert('No se pudo generar la receta. Comprueba que GEMINI_API_KEY está configurada en Vercel.');
+      } finally { setAiStatus(null); }
     }
   };
 
@@ -1340,60 +1322,30 @@ function RecipeEditor({ recipe, onSave, onSaveAsNew, onSaveToRecipeList, onDelet
               Solo los ingredientes afectan a la lista de la compra de esta semana.
             </div>
           )}
-          {/* ── Generar con IA ── */}
+          {/* ── Input inteligente: URL o texto → IA ── */}
           {isNew && (
-            <div style={{ marginBottom:12, padding:12, background:'#faf5ff', borderRadius:12, border:'1px solid #e9d5ff' }}>
-              <label style={{ ...labelStyle, color:'#7c3aed' }}>✨ Generar receta con IA</label>
+            <div style={{ marginBottom:16, padding:12, background:'#faf5ff', borderRadius:12, border:'1px solid #e9d5ff' }}>
+              <label style={{ ...labelStyle, color:'#7c3aed' }}>✨ Generar o importar con IA</label>
               <div style={{ display:'flex', gap:6 }}>
-                <input value={generateName} onChange={e => setGenerateName(e.target.value)}
-                  placeholder={form.name || 'Ej: Paella valenciana, Lentejas con chorizo…'}
-                  onKeyDown={e => e.key === 'Enter' && handleGenerate()}
-                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#d8b4fe' }} />
-                <button onClick={handleGenerate} disabled={generating}
-                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
-                    background: generating ? '#d8b4fe' : '#7c3aed',
+                <textarea value={smartInput} onChange={e => setSmartInput(e.target.value)}
+                  rows={2}
+                  placeholder={'URL de la receta, nombre del plato o descripción…\nEj: "Lentejas con chorizo y verduras" o https://allrecipes.com/…'}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSmartInput(); } }}
+                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#d8b4fe', resize:'none', lineHeight:1.5, background:'white', color:'#333333' }} />
+                <button onClick={handleSmartInput} disabled={!!aiStatus}
+                  style={{ padding:'8px 14px', borderRadius:10, border:'none',
+                    background: aiStatus ? '#d8b4fe' : '#7c3aed',
                     color:'white', fontSize:12, fontWeight:700,
-                    cursor: generating ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-                  {generating ? '✨ Generando…' : '✨ Generar'}
+                    cursor: aiStatus ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap', alignSelf:'stretch' }}>
+                  {aiStatus === 'fetch' ? '⏳ Descargando…'
+                    : aiStatus === 'ai' ? '✨ Mejorando…'
+                    : aiStatus === 'generating' ? '✨ Generando…'
+                    : '✨ Generar'}
                 </button>
               </div>
-              <div style={{ fontSize:10, color:'#7c3aed', marginTop:5 }}>
-                {generating
-                  ? 'La IA está creando ingredientes y pasos…'
-                  : 'Escribe el nombre del plato y la IA rellena todo el formulario'}
+              <div style={{ fontSize:10, color:'#9ca3af', marginTop:5 }}>
+                {aiStatus ? 'La IA está procesando…' : 'Pega una URL o describe el plato — la IA rellena todo el formulario'}
               </div>
-            </div>
-          )}
-
-          {/* ── Importar desde URL ── */}
-          {isNew && (
-            <div style={{ marginBottom:16, padding:12, background:'#f0fdf4', borderRadius:12, border:'1px solid #bbf7d0' }}>
-              <label style={{ ...labelStyle, color:'#15803d' }}>🔗 Importar desde URL (opcional)</label>
-              <div style={{ display:'flex', gap:6 }}>
-                <input value={importUrl} onChange={e=>setImportUrl(e.target.value)}
-                  placeholder="https://www.allrecipes.com/recipe/..."
-                  onKeyDown={e => e.key === 'Enter' && handleImportUrl()}
-                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#86efac' }} />
-                <button onClick={handleImportUrl} disabled={!!importing || !importUrl.trim()}
-                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
-                    background: importing ? '#86efac' : '#16a34a',
-                    color:'white', fontSize:12, fontWeight:700,
-                    cursor: importing ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-                  {importing === 'fetch' ? '⏳ Descargando…'
-                    : importing === 'ai' ? '✨ Mejorando…'
-                    : '↓ Importar'}
-                </button>
-              </div>
-              {importing === 'ai' && (
-                <div style={{ fontSize:10, color:'#15803d', marginTop:5, fontWeight:600 }}>
-                  ✨ Normalizando ingredientes y pasos con IA…
-                </div>
-              )}
-              {!importing && (
-                <div style={{ fontSize:10, color:'#16a34a', marginTop:5 }}>
-                  Pega un enlace de AllRecipes, BBC Good Food, Recetas.com… la IA normaliza el resultado
-                </div>
-              )}
             </div>
           )}
           <div style={{ marginBottom:16 }}>
@@ -1578,7 +1530,7 @@ function RecipeManager({ recipes, onEdit, onNew, onToggleFav }) {
     <div style={{ maxWidth:960, margin:'0 auto', padding:16 }}>
       <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar receta..."
-          style={{ flex:1, minWidth:160, fontSize:13, padding:'8px 12px', border:'1px solid #e0e0e0', borderRadius:8, outline:'none', color:'#333333' }}/>
+          style={{ flex:1, minWidth:160, fontSize:13, padding:'8px 12px', border:'1px solid #e0e0e0', borderRadius:8, outline:'none', color:'#333333', background:'white' }}/>
         <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}
           style={{ fontSize:12, padding:'8px 10px', border:'1px solid #e0e0e0', borderRadius:8, outline:'none', color:'#666666', background:'white' }}>
           <option value="all">Todos los tipos</option>

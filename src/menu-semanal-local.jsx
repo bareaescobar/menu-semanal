@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -658,6 +658,194 @@ function RecipeCard({ recipe, onSelect, onToggleFav, onViewRecipe, freq }) {
             cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4, color:'white', fontWeight:700 }}>
           <Plus size={11} /> Añadir
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── ShopPage ─────────────────────────────────────────────────────
+function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry }) {
+  const [subTab,     setSubTab]     = useState('list');
+  const [newName,    setNewName]    = useState('');
+  const [newNote,    setNewNote]    = useState('');
+  const [editingKey, setEditingKey] = useState(null);
+  const [editVal,    setEditVal]    = useState('');
+  const [copied,     setCopied]     = useState(false);
+
+  const pending = shoppingList.filter(i => !checked.has(i.k));
+  const done    = shoppingList.filter(i =>  checked.has(i.k));
+  const grouped = pending.reduce((acc, item) => {
+    const cat = categorizeIngredient(item.name);
+    if (!acc[cat.label]) acc[cat.label] = { cat, items: [] };
+    acc[cat.label].items.push(item);
+    return acc;
+  }, {});
+
+  const buildText = () => {
+    const lines = pending.map(i => { const n = shopNotes[i.k]; return `• ${i.name}  ${n || i.amount}`; }).join('\n');
+    return `🛒 Lista de la compra — semana del ${weekLabel(weekKey)}\n\n${lines}`;
+  };
+
+  const startEdit = (k) => { setEditingKey(k); setEditVal(shopNotes[k] || ''); };
+  const commitEdit = () => { if (editingKey) { onUpdateNote(editingKey, editVal.trim()); setEditingKey(null); } };
+
+  const ShopRow = ({ item, crossed }) => {
+    const note = shopNotes[item.k];
+    const isEd = editingKey === item.k;
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:8 }}>
+        <div onClick={() => onToggle(item.k, item)}
+          style={{ width:20, height:20, borderRadius:5, flexShrink:0, display:'flex', alignItems:'center',
+            justifyContent:'center', cursor:'pointer',
+            background: crossed ? '#22c55e' : 'transparent',
+            border: crossed ? '2px solid #22c55e' : '2px solid #d1d5db' }}>
+          {crossed && <Check size={11} strokeWidth={3} color="white" />}
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:13, fontWeight:500, color: crossed ? '#9ca3af' : '#374151',
+            textDecoration: crossed ? 'line-through' : 'none' }}>{item.name}</div>
+          <div style={{ fontSize:10, color:'#c0c0c0' }}>{item.amount}</div>
+        </div>
+        {!crossed && (isEd
+          ? <input value={editVal} onChange={e => setEditVal(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingKey(null); }}
+              autoFocus placeholder="ej: 2 latas"
+              style={{ width:90, fontSize:12, padding:'4px 7px', border:'1.5px solid #f59e0b',
+                borderRadius:6, outline:'none', color:'#92400e', background:'#fffbeb' }} />
+          : <button onClick={() => startEdit(item.k)}
+              style={{ fontSize:11, fontWeight:600, cursor:'pointer', padding:'3px 8px', borderRadius:6,
+                border:'none', whiteSpace:'nowrap', flexShrink:0,
+                background: note ? '#fef3c7' : '#f3f4f6', color: note ? '#92400e' : '#9ca3af' }}>
+              {note || '+ nota'}
+            </button>
+        )}
+        {crossed && note && <span style={{ fontSize:11, color:'#b0b0b0', flexShrink:0 }}>{note}</span>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="shop-page">
+      {/* Subtabs */}
+      <div className="shop-subtabs">
+        <button onClick={() => setSubTab('list')} className={`shop-subtab ${subTab === 'list' ? 'active' : ''}`}>
+          🛒 Lista de la compra
+          {pending.length > 0 && <span className="shop-subtab-badge">{pending.length}</span>}
+        </button>
+        <button onClick={() => setSubTab('pantry')} className={`shop-subtab ${subTab === 'pantry' ? 'active' : ''}`}>
+          🏠 En casa
+          {pantry.length > 0 && <span className="shop-subtab-badge" style={{ background:'#d1fae5', color:'#065f46' }}>{pantry.length}</span>}
+        </button>
+      </div>
+
+      <div className="shop-panels">
+        {/* ── Panel izquierdo: Lista de la compra ── */}
+        <div className={`shop-panel ${subTab !== 'list' ? 'shop-hidden-mobile' : ''}`}>
+          {/* Botones compartir */}
+          <div style={{ display:'flex', gap:6, padding:'12px 12px 8px', flexShrink:0 }}>
+            <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(buildText())}`, '_blank')}
+              style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                padding:'8px', borderRadius:9, border:'none', background:'#25D366', color:'white',
+                fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              <MessageCircle size={13}/> WhatsApp
+            </button>
+            <button onClick={() => navigator.clipboard.writeText(buildText()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })}
+              style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                padding:'8px', borderRadius:8, border:'1px solid #ebebeb',
+                background: copied ? '#f0fdf4' : 'white', color: copied ? '#16a34a' : '#6b7280',
+                fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              <Copy size={13}/> {copied ? '¡Copiado!' : 'Copiar'}
+            </button>
+          </div>
+          {/* Items */}
+          <div style={{ overflowY:'auto', flex:1, padding:'0 4px 80px' }}>
+            {shoppingList.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'48px 16px', color:'#d1d5db' }}>
+                <ShoppingCart size={30} style={{ margin:'0 auto 10px', display:'block' }} />
+                <p style={{ fontSize:13, margin:0 }}>Añade platos al menú para generar la lista</p>
+              </div>
+            ) : (
+              <>
+                {Object.values(grouped).map(({ cat, items: si }) => (
+                  <div key={cat.label} style={{ marginBottom:8 }}>
+                    <div style={{ background:cat.color, borderRadius:8, padding:'5px 10px', margin:'0 6px 2px' }}>
+                      <span style={{ fontSize:11, fontWeight:700, color:cat.textColor }}>{cat.label}</span>
+                    </div>
+                    {si.map(item => <ShopRow key={item.k} item={item} crossed={false} />)}
+                  </div>
+                ))}
+                {done.length > 0 && (
+                  <>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                      padding:'14px 10px 4px', fontSize:10, color:'#d1d5db', fontWeight:700,
+                      letterSpacing:'0.08em', textTransform:'uppercase' }}>
+                      <span>Comprado ✓</span>
+                      <button onClick={onClearChecked}
+                        style={{ border:'none', background:'none', fontSize:10, color:'#d1d5db', cursor:'pointer', fontWeight:600 }}>
+                        limpiar
+                      </button>
+                    </div>
+                    {done.map(item => <ShopRow key={item.k} item={item} crossed={true} />)}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Panel derecho: En casa ── */}
+        <div className={`shop-panel shop-panel-right ${subTab !== 'pantry' ? 'shop-hidden-mobile' : ''}`}>
+          {/* Formulario añadir */}
+          <div style={{ padding:'12px 12px 10px', borderBottom:'1px solid #f3f4f6', flexShrink:0 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:'#9ca3af', letterSpacing:'0.08em',
+              textTransform:'uppercase', marginBottom:6 }}>Añadir a la despensa</div>
+            <div style={{ display:'flex', gap:6 }}>
+              <input value={newName} onChange={e => setNewName(e.target.value)}
+                placeholder="Nombre del alimento"
+                onKeyDown={e => { if (e.key === 'Enter') { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); } }}
+                style={{ flex:2, fontSize:13, padding:'8px 10px', border:'1px solid #ebebeb', borderRadius:8, outline:'none' }} />
+              <input value={newNote} onChange={e => setNewNote(e.target.value)}
+                placeholder="Cantidad"
+                onKeyDown={e => { if (e.key === 'Enter') { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); } }}
+                style={{ flex:1, fontSize:13, padding:'8px 8px', border:'1px solid #ebebeb', borderRadius:8, outline:'none' }} />
+              <button onClick={() => { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); }}
+                style={{ padding:'8px 14px', borderRadius:8, border:'none', background:'#f59e0b', color:'white', fontWeight:700, fontSize:15, cursor:'pointer', flexShrink:0 }}>
+                +
+              </button>
+            </div>
+          </div>
+          {/* Lista despensa */}
+          <div style={{ overflowY:'auto', flex:1, padding:'4px 4px 80px' }}>
+            {pantry.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'48px 16px', color:'#d1d5db' }}>
+                <span style={{ fontSize:30, display:'block', marginBottom:10 }}>🏠</span>
+                <p style={{ fontSize:13, margin:0 }}>Vacío — los artículos comprados<br/>aparecerán aquí automáticamente</p>
+              </div>
+            ) : (
+              pantry.slice().reverse().map(pItem => (
+                <div key={pItem.id}
+                  style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:8 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:500, color:'#374151' }}>{pItem.name}</div>
+                    {pItem.note && <div style={{ fontSize:11, color:'#9ca3af' }}>{pItem.note}</div>}
+                  </div>
+                  <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:6, flexShrink:0,
+                    background: pItem.source === 'shop' ? '#dcfce7' : '#f3f4f6',
+                    color: pItem.source === 'shop' ? '#16a34a' : '#6b7280' }}>
+                    {pItem.source === 'shop' ? '🛒 compra' : '➕ manual'}
+                  </span>
+                  <button onClick={() => onRemoveFromPantry(pItem.id)}
+                    style={{ border:'none', background:'#fee2e2', color:'#ef4444', borderRadius:6,
+                      width:28, height:28, cursor:'pointer', display:'flex', alignItems:'center',
+                      justifyContent:'center', flexShrink:0 }}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1553,6 +1741,8 @@ export default function App() {
   const [recipes, setRecipes] = useState(() => migrateRecipes(loadLS(SKEY+'_recipes', RECIPES_BASE)));
   const [history, setHistory]           = useState(() => loadLS(SKEY+'_history', {}));
   const [checked, setChecked]           = useState(() => new Set(loadLS(SKEY+'_checked', [])));
+  const [pantry, setPantry]             = useState(() => loadLS(SKEY+'_pantry', []));
+  const [shopNotes, setShopNotes]       = useState(() => loadLS(SKEY+'_shopnotes', {}));
   const [weekKey, setWeekKey]           = useState(() => getWeekKey(new Date()));
   const [activeSlot, setActiveSlot]     = useState(null);
   const [recipeModal, setRecipeModal]   = useState(null);
@@ -1576,13 +1766,14 @@ export default function App() {
       dbLoad('recipes'),
       dbLoad('history'),
       dbLoad('checked'),
-    ]).then(([dbRecipes, dbHistory, dbChecked]) => {
+      dbLoad('pantry'),
+      dbLoad('shopnotes'),
+    ]).then(([dbRecipes, dbHistory, dbChecked, dbPantry, dbShopNotes]) => {
       if (dbRecipes) {
         const migrated = migrateRecipes(dbRecipes);
         setRecipes(migrated);
         saveLS(SKEY+'_recipes', migrated);
       } else {
-        // Supabase vacío: migrar datos de localStorage a Supabase
         setRecipes(prev => { dbSave('recipes', prev); return prev; });
       }
       if (dbHistory) {
@@ -1596,6 +1787,18 @@ export default function App() {
         saveLS(SKEY+'_checked', dbChecked);
       } else {
         setChecked(prev => { dbSave('checked', [...prev]); return prev; });
+      }
+      if (dbPantry) {
+        setPantry(dbPantry);
+        saveLS(SKEY+'_pantry', dbPantry);
+      } else {
+        setPantry(prev => { dbSave('pantry', prev); return prev; });
+      }
+      if (dbShopNotes) {
+        setShopNotes(dbShopNotes);
+        saveLS(SKEY+'_shopnotes', dbShopNotes);
+      } else {
+        setShopNotes(prev => { dbSave('shopnotes', prev); return prev; });
       }
     }).catch(() => {}).finally(() => {
       setDbSyncing(false);
@@ -1626,6 +1829,16 @@ export default function App() {
   useEffect(() => {
     dbSave('history', history);
   }, [history]);
+
+  useEffect(() => {
+    saveLS(SKEY+'_pantry', pantry);
+    dbSave('pantry', pantry);
+  }, [pantry]);
+
+  useEffect(() => {
+    saveLS(SKEY+'_shopnotes', shopNotes);
+    dbSave('shopnotes', shopNotes);
+  }, [shopNotes]);
 
   useEffect(() => {
     if (recipeModal) {
@@ -1761,6 +1974,40 @@ export default function App() {
     // dbSave for history triggered by the useEffect above
   };
 
+  const handleShopToggle = (k, item) => {
+    const isChecking = !checked.has(k);
+    setChecked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+    if (isChecking && item) {
+      const note = shopNotes[k] || item.amount;
+      setPantry(prev => {
+        const exists = prev.find(p => p.name.toLowerCase() === k);
+        if (exists) return prev.map(p => p.name.toLowerCase() === k ? { ...p, note, source: 'shop', addedAt: new Date().toISOString() } : p);
+        return [...prev, { id: Date.now() + '_' + k, name: item.name, note, source: 'shop', addedAt: new Date().toISOString() }];
+      });
+    }
+  };
+
+  const handleUpdateShopNote = (k, note) => {
+    setShopNotes(prev => note ? { ...prev, [k]: note } : Object.fromEntries(Object.entries(prev).filter(([key]) => key !== k)));
+  };
+
+  const handleAddToPantry = ({ name, note, source }) => {
+    setPantry(prev => {
+      const key = name.trim().toLowerCase();
+      const exists = prev.find(p => p.name.toLowerCase() === key);
+      if (exists) return prev.map(p => p.name.toLowerCase() === key ? { ...p, note: note || p.note, addedAt: new Date().toISOString() } : p);
+      return [...prev, { id: Date.now() + '_' + key, name: name.trim(), note: note || '', source, addedAt: new Date().toISOString() }];
+    });
+  };
+
+  const handleRemoveFromPantry = (id) => {
+    setPantry(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleClearShopChecked = () => {
+    setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; });
+  };
+
   const TABS = [
     { key:'board',   icon:'🗓', label:'Pizarra' },
     { key:'recipes', icon:'📖', label:'Recetas' },
@@ -1840,12 +2087,25 @@ export default function App() {
         </div>
       )}
 
-      {/* MAIN: PIZARRA + LISTA */}
-      {mobileTab !== 'recipes' && (
+      {/* TAB: COMPRA — pantalla completa */}
+      {mobileTab === 'shop' && (
+        <div className="shop-full-page">
+          <ShopPage
+            shoppingList={shoppingList} checked={checked}
+            onToggle={handleShopToggle}
+            onClearChecked={handleClearShopChecked}
+            weekKey={weekKey}
+            shopNotes={shopNotes} onUpdateNote={handleUpdateShopNote}
+            pantry={pantry} onAddToPantry={handleAddToPantry} onRemoveFromPantry={handleRemoveFromPantry} />
+        </div>
+      )}
+
+      {/* MAIN: PIZARRA */}
+      {mobileTab !== 'recipes' && mobileTab !== 'shop' && (
         <div className="main-layout">
 
           {/* PIZARRA */}
-          <div className={`board-area ${mobileTab === 'shop' ? 'hidden-mobile' : ''}`}>
+          <div className="board-area">
 
             {/* ── MÓVIL: selector de días + vista de un día ── */}
             <div className="mobile-board">
@@ -1933,14 +2193,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* LISTA COMPRA — solo en tab 'shop' */}
-          {mobileTab === 'shop' && (
-            <div className="shopping-sidebar" id="sidebar-shopping">
-              <ShoppingList items={shoppingList} checked={checked} weekKey={weekKey}
-                onToggle={k => setChecked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-                onClearChecked={() => setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; })} />
-            </div>
-          )}
         </div>
       )}
 
@@ -2106,6 +2358,46 @@ export default function App() {
         .shopping-sidebar {
           width: 290px; flex-shrink: 0;
           position: sticky; top: 90px;
+        }
+
+        /* ── ShopPage ───────────────────────────────── */
+        .shop-full-page {
+          max-width: 900px; margin: 0 auto; padding: 20px 20px 80px;
+          height: calc(100vh - 130px); display: flex; flex-direction: column;
+        }
+        .shop-page {
+          flex: 1; display: flex; flex-direction: column; min-height: 0;
+          background: white; border-radius: 14px; border: 1px solid #ebebeb;
+          overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .shop-subtabs {
+          display: flex; border-bottom: 2px solid #f3f4f6; flex-shrink: 0; background: white;
+        }
+        .shop-subtab {
+          flex: 1; padding: 13px 16px; border: none; background: transparent;
+          font-size: 13px; font-weight: 600; color: #9ca3af; cursor: pointer;
+          display: flex; align-items: center; justify-content: center; gap: 7px;
+          border-bottom: 2px solid transparent; margin-bottom: -2px;
+          transition: color 0.15s;
+        }
+        .shop-subtab.active { color: #f59e0b; border-bottom-color: #f59e0b; }
+        .shop-subtab:hover:not(.active) { color: #6b7280; background: #fafafa; }
+        .shop-subtab-badge {
+          background: #fef3c7; color: #92400e;
+          font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 99px;
+        }
+        .shop-panels {
+          flex: 1; display: flex; min-height: 0; overflow: hidden;
+        }
+        .shop-panel {
+          flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+        }
+        .shop-panel-right { border-left: 1px solid #f3f4f6; }
+        .shop-hidden-mobile { display: none !important; }
+        @media (min-width: 768px) {
+          .shop-hidden-mobile { display: flex !important; }
+          .shop-full-page { height: calc(100vh - 110px); }
+          .shop-subtabs { display: none; }
         }
 
         /* ── DayColumn ─────────────────────────────── */

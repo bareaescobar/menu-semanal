@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.14.3';
+const APP_VERSION = '1.14.4';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -2089,6 +2089,61 @@ export default function App() {
     setRecipeEditor(false); // open as new recipe
   };
 
+  // ── Backup / Restore ─────────────────────────────────────────────
+  const handleExportBackup = () => {
+    const payload = {
+      app: 'menu-semanal',
+      version: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: {
+        recipes,
+        history,
+        checked: [...checked],
+        pantry,
+        shopnotes: shopNotes,
+      },
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    a.href     = url;
+    a.download = `menu-semanal-backup-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowClear(false);
+  };
+
+  const handleImportBackup = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const payload = JSON.parse(ev.target.result);
+        if (payload.app !== 'menu-semanal' || !payload.data) {
+          alert('Fichero no válido. Debe ser una copia exportada desde esta app.');
+          return;
+        }
+        if (!window.confirm(
+          `¿Restaurar copia del ${new Date(payload.exportedAt).toLocaleDateString('es-ES')}?\n\nEsto reemplazará todos tus datos actuales (recetas, semanas, despensa…).`
+        )) return;
+        const { data } = payload;
+        if (data.recipes)   { setRecipes(data.recipes);   saveLS(SKEY+'_recipes',  data.recipes);  dbSave('recipes',  data.recipes);  }
+        if (data.history)   { setHistory(data.history);   saveLS(SKEY+'_history',  data.history);  dbSave('history',  data.history);  }
+        if (data.checked)   { setChecked(new Set(data.checked)); saveLS(SKEY+'_checked', data.checked); dbSave('checked', data.checked); }
+        if (data.pantry)    { setPantry(data.pantry);     saveLS(SKEY+'_pantry',   data.pantry);   dbSave('pantry',   data.pantry);   }
+        if (data.shopnotes) { setShopNotes(data.shopnotes); saveLS(SKEY+'_shopnotes', data.shopnotes); dbSave('shopnotes', data.shopnotes); }
+        setShowClear(false);
+        alert('✅ Copia restaurada correctamente.');
+      } catch {
+        alert('No se pudo leer el fichero. Asegúrate de que es un JSON válido.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleShopToggle = (k, item) => {
     const isChecking = !checked.has(k);
     setChecked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -2180,11 +2235,25 @@ export default function App() {
             ) : (
               <WeekPicker weekKey={weekKey} onChange={setWeekKey} history={history} />
             )}
-            {mobileTab !== 'recipes' && showClear && (
-              <button onClick={() => { if (window.confirm('¿Limpiar el menú de esta semana?')) { setMenu(emptyMenu()); setShowClear(false); }}}
-                className="btn-clear-week">
-                🗑 Limpiar semana
-              </button>
+            {showClear && (
+              <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                <button onClick={handleExportBackup}
+                  style={{ fontSize:11, color:'#7c3aed', border:'1.5px solid #ddd6fe', background:'white',
+                    borderRadius:999, padding:'6px 12px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}>
+                  💾 Guardar copia
+                </button>
+                <label style={{ fontSize:11, color:'#2563eb', border:'1.5px solid #bfdbfe', background:'white',
+                  borderRadius:999, padding:'6px 12px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}>
+                  📂 Restaurar
+                  <input type="file" accept=".json" onChange={handleImportBackup} style={{ display:'none' }} />
+                </label>
+                {mobileTab !== 'recipes' && (
+                  <button onClick={() => { if (window.confirm('¿Limpiar el menú de esta semana?')) { setMenu(emptyMenu()); setShowClear(false); }}}
+                    className="btn-clear-week">
+                    🗑 Limpiar semana
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

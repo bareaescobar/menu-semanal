@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.13.3';
+const APP_VERSION = '1.13.4';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -664,7 +664,7 @@ function RecipeCard({ recipe, onSelect, onToggleFav, onViewRecipe, freq }) {
 }
 
 // ── ShopPage ─────────────────────────────────────────────────────
-function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry }) {
+function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry, onReturnToShop }) {
   const [subTab,     setSubTab]     = useState('list');
   const [newName,    setNewName]    = useState('');
   const [newNote,    setNewNote]    = useState('');
@@ -828,11 +828,21 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
                   <span style={{ flex:1, fontSize:13, fontWeight:500, color:'#374151', minWidth:0,
                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pItem.name}</span>
                   {pItem.note && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{pItem.note}</span>}
-                  <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:6, flexShrink:0,
-                    background: pItem.source === 'shop' ? '#dcfce7' : '#f3f4f6',
-                    color: pItem.source === 'shop' ? '#16a34a' : '#6b7280' }}>
-                    {pItem.source === 'shop' ? '🛒 compra' : '➕ manual'}
-                  </span>
+                  {pItem.source === 'shop' ? (
+                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 4px 2px 6px', borderRadius:6, flexShrink:0,
+                      background:'#dcfce7', color:'#16a34a', display:'flex', alignItems:'center', gap:2 }}>
+                      🛒 compra
+                      <button onClick={() => onReturnToShop(pItem)}
+                        title="Volver a la lista de la compra"
+                        style={{ border:'none', background:'none', cursor:'pointer', padding:'0 2px',
+                          color:'#16a34a', fontSize:11, lineHeight:1, display:'flex', alignItems:'center' }}>
+                        ↩
+                      </button>
+                    </span>
+                  ) : (
+                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:6, flexShrink:0,
+                      background:'#f3f4f6', color:'#6b7280' }}>➕ manual</span>
+                  )}
                   <button onClick={() => onRemoveFromPantry(pItem.id)}
                     style={{ border:'none', background:'#fee2e2', color:'#ef4444', borderRadius:6,
                       width:28, height:28, cursor:'pointer', display:'flex', alignItems:'center',
@@ -2006,6 +2016,12 @@ export default function App() {
     setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; });
   };
 
+  const handleReturnToShop = (pItem) => {
+    const k = pItem.name.trim().toLowerCase();
+    setChecked(p => { const n = new Set(p); n.delete(k); return n; });
+    setPantry(prev => prev.filter(p => p.id !== pItem.id));
+  };
+
   const TABS = [
     { key:'board',   icon:'🗓', label:'Pizarra' },
     { key:'recipes', icon:'📖', label:'Recetas' },
@@ -2094,7 +2110,7 @@ export default function App() {
             onClearChecked={handleClearShopChecked}
             weekKey={weekKey}
             shopNotes={shopNotes} onUpdateNote={handleUpdateShopNote}
-            pantry={pantry} onAddToPantry={handleAddToPantry} onRemoveFromPantry={handleRemoveFromPantry} />
+            pantry={pantry} onAddToPantry={handleAddToPantry} onRemoveFromPantry={handleRemoveFromPantry} onReturnToShop={handleReturnToShop} />
         </div>
       )}
 

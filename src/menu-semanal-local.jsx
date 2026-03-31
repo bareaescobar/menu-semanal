@@ -2197,7 +2197,7 @@ export default function App() {
       {/* HEADER */}
       <div className="app-header">
         <div className="header-inner">
-          {/* Fila 1: título + tabs (desktop) */}
+          {/* Fila 1: título + tabs (desktop) + ··· */}
           <div className="header-row1">
             <div className="header-brand">
               <span className="header-logo">🥘</span>
@@ -2222,11 +2222,13 @@ export default function App() {
                   )}
                 </button>
               ))}
-              <button onClick={() => setShowClear(v => !v)}
-                className="more-btn" title="Más opciones">···</button>
             </div>
+            {/* ··· siempre visible (móvil y desktop) */}
+            <button onClick={() => setShowClear(v => !v)}
+              className="more-btn" title="Más opciones"
+              style={{ color: showClear ? '#f59e0b' : undefined }}>···</button>
           </div>
-          {/* Fila 2: selector semana / botón nueva receta + limpiar */}
+          {/* Fila 2: selector semana / botón nueva receta */}
           <div className="header-row2">
             {mobileTab === 'recipes' || mobileTab === 'history' ? (
               <button onClick={() => setRecipeEditor(false)} className="btn-new-recipe">
@@ -2235,27 +2237,28 @@ export default function App() {
             ) : (
               <WeekPicker weekKey={weekKey} onChange={setWeekKey} history={history} />
             )}
-            {showClear && (
-              <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
-                <button onClick={handleExportBackup}
-                  style={{ fontSize:11, color:'#7c3aed', border:'1.5px solid #ddd6fe', background:'white',
-                    borderRadius:999, padding:'6px 12px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}>
-                  💾 Guardar copia
-                </button>
-                <label style={{ fontSize:11, color:'#2563eb', border:'1.5px solid #bfdbfe', background:'white',
-                  borderRadius:999, padding:'6px 12px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}>
-                  📂 Restaurar
-                  <input type="file" accept=".json" onChange={handleImportBackup} style={{ display:'none' }} />
-                </label>
-                {mobileTab !== 'recipes' && (
-                  <button onClick={() => { if (window.confirm('¿Limpiar el menú de esta semana?')) { setMenu(emptyMenu()); setShowClear(false); }}}
-                    className="btn-clear-week">
-                    🗑 Limpiar semana
-                  </button>
-                )}
-              </div>
-            )}
           </div>
+          {/* Fila 3: panel de acciones (backup / limpiar) */}
+          {showClear && (
+            <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap', paddingTop:8, borderTop:'1px solid #f3f4f6', marginTop:6 }}>
+              <button onClick={handleExportBackup}
+                style={{ fontSize:11, color:'#7c3aed', border:'1.5px solid #ddd6fe', background:'white',
+                  borderRadius:999, padding:'6px 12px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}>
+                💾 Guardar copia
+              </button>
+              <label style={{ fontSize:11, color:'#2563eb', border:'1.5px solid #bfdbfe', background:'white',
+                borderRadius:999, padding:'6px 12px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}>
+                📂 Restaurar
+                <input type="file" accept=".json" onChange={handleImportBackup} style={{ display:'none' }} />
+              </label>
+              {mobileTab !== 'recipes' && (
+                <button onClick={() => { if (window.confirm('¿Limpiar el menú de esta semana?')) { setMenu(emptyMenu()); setShowClear(false); }}}
+                  className="btn-clear-week">
+                  🗑 Limpiar semana
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

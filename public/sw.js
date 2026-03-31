@@ -20,14 +20,18 @@ self.addEventListener('fetch', e => {
   if (new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     caches.match(e.request).then(cached => {
-      const network = fetch(e.request).then(res => {
+      const networkFetch = fetch(e.request).then(res => {
         if (res.ok && res.status === 200) {
-          const toCache = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, toCache));
+          caches.open(CACHE).then(c => c.put(e.request, res.clone()));
         }
         return res;
       });
-      return cached || network;
+      if (cached) {
+        // Background revalidation — suppress unhandled rejection when offline
+        networkFetch.catch(() => {});
+        return cached;
+      }
+      return networkFetch;
     })
   );
 });

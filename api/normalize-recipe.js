@@ -37,7 +37,7 @@ Responde SOLO con JSON válido, sin texto adicional ni bloques de código, con e
 {"ingredients":[{"amount":"...","name":"..."}],"steps":["...","..."]}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

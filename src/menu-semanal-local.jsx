@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.14.2';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -257,6 +257,51 @@ function mergeAmounts(amounts) {
     return `${display} ${units[0]}`.trim();
   }
   return amounts.join(' + ');
+}
+
+// ── Normalizar unidades de cantidad ──────────────────────────────
+const UNIT_ALIASES = [
+  [/\bmililitros?\b|\bmls\b/gi,          'ml'],
+  [/\blitros?\b/gi,                       'L'],
+  [/\bkilogramos?\b|\bkilos?\b|\bkgs\b/gi,'kg'],
+  [/\bgramos?\b|\bgrs?\b/gi,              'g'],
+  [/\bcucharaditas?\b|\bcdtas?\b/gi,      'cdta'],
+  [/\bcucharadas?\b|\bcdas?\b/gi,         'cda'],
+  [/\bunidades?\b|\buds\b/gi,             'ud'],
+  [/\btazas?\b/gi,                        'taza'],
+  [/\bmanojos?\b/gi,                      'manojo'],
+  [/\bpizcas?\b/gi,                       'pizca'],
+  [/\btrozos?\b/gi,                       'trozo'],
+  [/\bdientes?\b/gi,                      'diente'],
+  [/\blatas?\b/gi,                        'lata'],
+  [/\bbolsas?\b/gi,                       'bolsa'],
+  [/\bpaquetes?\b/gi,                     'paquete'],
+  [/\brajas?\b/gi,                        'raja'],
+  [/\bhojas?\b/gi,                        'hoja'],
+  [/\bfiletes?\b/gi,                      'filete'],
+  [/\braciones?\b|\bracion\b/gi,          'ración'],
+];
+const CANON_UNITS = ['ml','L','g','kg','ud','cda','cdta','taza','manojo','pizca','trozo','diente','lata','bolsa','paquete','raja','hoja','filete','ración'];
+
+function normalizeAmount(raw) {
+  if (!raw || typeof raw !== 'string') return raw || '';
+  let s = raw.trim();
+  if (/^al\s+gusto$/i.test(s)) return 'al gusto';
+  // Unicode & slash fractions → decimal
+  s = s.replace(/½/g,'0.5').replace(/¼/g,'0.25').replace(/¾/g,'0.75').replace(/⅓/g,'0.33').replace(/⅔/g,'0.67');
+  s = s.replace(/\b(\d+)\/(\d+)\b/g, (_,a,b) => (parseFloat(a)/parseFloat(b)).toFixed(2).replace(/\.?0+$/, ''));
+  // Replace unit aliases with canonical forms
+  for (const [re, canon] of UNIT_ALIASES) s = s.replace(re, canon);
+  // Ensure space between number and unit
+  const unitPat = CANON_UNITS.join('|');
+  s = s.replace(new RegExp(`(\\d)(${unitPat})\\b`, 'g'), '$1 $2');
+  // Collapse spaces
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+// Applies normalizeAmount to all ingredients in a recipe-form object
+function normalizeIngredients(ingredients) {
+  return (ingredients || []).map(i => ({ ...i, amount: normalizeAmount(i.amount) }));
 }
 
 // ── Categorización de ingredientes para lista de compra ───────────
@@ -505,7 +550,7 @@ async function importRecipeFromUrl(url) {
 }
 
 
-function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRecipe, hasOverride }) {
+function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRecipe, hasOverride, overrideName }) {
   const [hover, setHover] = useState(false);
   const [btnHover, setBtnHover] = useState(false);
   const s = SS[slotKey];
@@ -534,7 +579,7 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
           <X size={10} strokeWidth={3} />
         </button>
         <div className="postit-emoji">{isFuera ? '🍴' : slot.emoji}</div>
-        <div className="postit-name" style={{ color: isFuera ? '#aaaaaa' : '#111111' }}>{recipe.name}</div>
+        <div className="postit-name" style={{ color: isFuera ? '#aaaaaa' : '#111111' }}>{overrideName || recipe.name}</div>
         {!isFuera && (
           <div className="postit-meta">
             <Clock size={9} /><span>{recipe.time}m</span>
@@ -581,14 +626,19 @@ function DayColumn({ day, dayShort, menuDay, recipes, overrides, onSlotClick, on
         <div className="day-name">{day}</div>
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-        {SLOTS.map(({ key }) => (
-          <PostItSlot key={key} slotKey={key}
-            menuVal={menuDay[key]} recipes={recipes}
-            hasOverride={overrides?.[`${day}_${key}`]?.recipeId === menuDay[key]}
-            onSlotClick={() => onSlotClick(day, key)}
-            onRemove={() => onRemoveSlot(day, key)}
-            onViewRecipe={(rid, sk) => onViewRecipe(rid, sk, day)} />
-        ))}
+        {SLOTS.map(({ key }) => {
+          const ov = overrides?.[`${day}_${key}`];
+          const hasOv = ov?.recipeId === menuDay[key];
+          return (
+            <PostItSlot key={key} slotKey={key}
+              menuVal={menuDay[key]} recipes={recipes}
+              hasOverride={hasOv}
+              overrideName={hasOv ? ov.name : null}
+              onSlotClick={() => onSlotClick(day, key)}
+              onRemove={() => onRemoveSlot(day, key)}
+              onViewRecipe={(rid, sk) => onViewRecipe(rid, sk, day)} />
+          );
+        })}
       </div>
     </div>
   );
@@ -653,6 +703,202 @@ function RecipeCard({ recipe, onSelect, onToggleFav, onViewRecipe, freq }) {
             cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4, color:'white', fontWeight:700 }}>
           <Plus size={11} /> Añadir
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── ShopPage ─────────────────────────────────────────────────────
+function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry, onReturnToShop }) {
+  const [subTab,     setSubTab]     = useState('list');
+  const [newName,    setNewName]    = useState('');
+  const [newNote,    setNewNote]    = useState('');
+  const [editingKey, setEditingKey] = useState(null);
+  const [editVal,    setEditVal]    = useState('');
+  const [copied,     setCopied]     = useState(false);
+
+  const pending = shoppingList.filter(i => !checked.has(i.k));
+  const done    = shoppingList.filter(i =>  checked.has(i.k));
+  const grouped = pending.reduce((acc, item) => {
+    const cat = categorizeIngredient(item.name);
+    if (!acc[cat.label]) acc[cat.label] = { cat, items: [] };
+    acc[cat.label].items.push(item);
+    return acc;
+  }, {});
+
+  const buildText = () => {
+    const lines = pending.map(i => { const n = shopNotes[i.k]; return `• ${i.name}  ${n || i.amount}`; }).join('\n');
+    return `🛒 Lista de la compra — semana del ${weekLabel(weekKey)}\n\n${lines}`;
+  };
+
+  const startEdit = (k) => { setEditingKey(k); setEditVal(shopNotes[k] || ''); };
+  const commitEdit = () => { if (editingKey) { onUpdateNote(editingKey, editVal.trim()); setEditingKey(null); } };
+
+  const ShopRow = ({ item, crossed }) => {
+    const note = shopNotes[item.k];
+    const isEd = editingKey === item.k;
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px', borderRadius:7 }}>
+        <div onClick={() => onToggle(item.k, item)}
+          style={{ width:18, height:18, borderRadius:4, flexShrink:0, display:'flex', alignItems:'center',
+            justifyContent:'center', cursor:'pointer',
+            background: crossed ? '#22c55e' : 'transparent',
+            border: crossed ? '2px solid #22c55e' : '2px solid #d1d5db' }}>
+          {crossed && <Check size={10} strokeWidth={3} color="white" />}
+        </div>
+        <span style={{ flex:1, fontSize:13, fontWeight:500, color: crossed ? '#9ca3af' : '#374151',
+          textDecoration: crossed ? 'line-through' : 'none', minWidth:0, overflow:'hidden',
+          textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</span>
+        <span style={{ fontSize:11, color:'#c0c0c0', flexShrink:0 }}>{item.amount}</span>
+        {!crossed && (isEd
+          ? <input value={editVal} onChange={e => setEditVal(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingKey(null); }}
+              autoFocus placeholder="ej: 2 latas"
+              style={{ width:85, fontSize:11, padding:'3px 6px', border:'1.5px solid #f59e0b',
+                borderRadius:5, outline:'none', color:'#92400e', background:'#fffbeb', flexShrink:0 }} />
+          : <button onClick={() => startEdit(item.k)}
+              style={{ fontSize:10, fontWeight:600, cursor:'pointer', padding:'2px 7px', borderRadius:5,
+                border:'none', whiteSpace:'nowrap', flexShrink:0,
+                background: note ? '#fef3c7' : '#f3f4f6', color: note ? '#92400e' : '#b0b0b0' }}>
+              {note || '+ nota'}
+            </button>
+        )}
+        {crossed && note && <span style={{ fontSize:10, color:'#b0b0b0', flexShrink:0 }}>{note}</span>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="shop-page">
+      {/* Subtabs */}
+      <div className="shop-subtabs">
+        <button onClick={() => setSubTab('list')} className={`shop-subtab ${subTab === 'list' ? 'active' : ''}`}>
+          🛒 Lista de la compra
+          {pending.length > 0 && <span className="shop-subtab-badge">{pending.length}</span>}
+        </button>
+        <button onClick={() => setSubTab('pantry')} className={`shop-subtab ${subTab === 'pantry' ? 'active' : ''}`}>
+          🏠 En casa
+          {pantry.length > 0 && <span className="shop-subtab-badge" style={{ background:'#d1fae5', color:'#065f46' }}>{pantry.length}</span>}
+        </button>
+      </div>
+
+      <div className="shop-panels">
+        {/* ── Panel izquierdo: Lista de la compra ── */}
+        <div className={`shop-panel ${subTab !== 'list' ? 'shop-hidden-mobile' : ''}`}>
+          {/* Botones compartir */}
+          <div style={{ display:'flex', gap:6, padding:'12px 12px 8px', flexShrink:0 }}>
+            <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(buildText())}`, '_blank')}
+              style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                padding:'8px', borderRadius:9, border:'none', background:'#25D366', color:'white',
+                fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              <MessageCircle size={13}/> WhatsApp
+            </button>
+            <button onClick={() => navigator.clipboard.writeText(buildText()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })}
+              style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                padding:'8px', borderRadius:8, border:'1px solid #ebebeb',
+                background: copied ? '#f0fdf4' : 'white', color: copied ? '#16a34a' : '#6b7280',
+                fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              <Copy size={13}/> {copied ? '¡Copiado!' : 'Copiar'}
+            </button>
+          </div>
+          {/* Items */}
+          <div style={{ overflowY:'auto', flex:1, padding:'0 4px 80px' }}>
+            {shoppingList.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'48px 16px', color:'#d1d5db' }}>
+                <ShoppingCart size={30} style={{ margin:'0 auto 10px', display:'block' }} />
+                <p style={{ fontSize:13, margin:0 }}>Añade platos al menú para generar la lista</p>
+              </div>
+            ) : (
+              <>
+                {Object.values(grouped).map(({ cat, items: si }) => (
+                  <div key={cat.label} style={{ marginBottom:4 }}>
+                    <div style={{ background:cat.color, borderRadius:6, padding:'3px 10px', margin:'4px 6px 1px' }}>
+                      <span style={{ fontSize:10, fontWeight:700, color:cat.textColor }}>{cat.label}</span>
+                    </div>
+                    {si.map(item => <ShopRow key={item.k} item={item} crossed={false} />)}
+                  </div>
+                ))}
+                {done.length > 0 && (
+                  <>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                      padding:'14px 10px 4px', fontSize:10, color:'#d1d5db', fontWeight:700,
+                      letterSpacing:'0.08em', textTransform:'uppercase' }}>
+                      <span>Comprado ✓</span>
+                      <button onClick={onClearChecked}
+                        style={{ border:'none', background:'none', fontSize:10, color:'#d1d5db', cursor:'pointer', fontWeight:600 }}>
+                        limpiar
+                      </button>
+                    </div>
+                    {done.map(item => <ShopRow key={item.k} item={item} crossed={true} />)}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Panel derecho: En casa ── */}
+        <div className={`shop-panel shop-panel-right ${subTab !== 'pantry' ? 'shop-hidden-mobile' : ''}`}>
+          {/* Formulario añadir */}
+          <div style={{ padding:'12px 12px 10px', borderBottom:'1px solid #f3f4f6', flexShrink:0 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:'#9ca3af', letterSpacing:'0.08em',
+              textTransform:'uppercase', marginBottom:6 }}>Añadir a la despensa</div>
+            <div style={{ display:'flex', gap:6 }}>
+              <input value={newName} onChange={e => setNewName(e.target.value)}
+                placeholder="Nombre del alimento"
+                onKeyDown={e => { if (e.key === 'Enter') { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); } }}
+                style={{ flex:2, fontSize:13, padding:'8px 10px', border:'1px solid #ebebeb', borderRadius:8, outline:'none', background:'white', color:'#333333' }} />
+              <input value={newNote} onChange={e => setNewNote(e.target.value)}
+                placeholder="Cantidad"
+                onKeyDown={e => { if (e.key === 'Enter') { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); } }}
+                style={{ flex:1, fontSize:13, padding:'8px 8px', border:'1px solid #ebebeb', borderRadius:8, outline:'none', background:'white', color:'#333333' }} />
+              <button onClick={() => { if (!newName.trim()) return; onAddToPantry({ name: newName.trim(), note: newNote.trim(), source: 'manual' }); setNewName(''); setNewNote(''); }}
+                style={{ padding:'8px 14px', borderRadius:8, border:'none', background:'#f59e0b', color:'white', fontWeight:700, fontSize:15, cursor:'pointer', flexShrink:0 }}>
+                +
+              </button>
+            </div>
+          </div>
+          {/* Lista despensa */}
+          <div style={{ overflowY:'auto', flex:1, padding:'4px 4px 80px' }}>
+            {pantry.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'48px 16px', color:'#d1d5db' }}>
+                <span style={{ fontSize:30, display:'block', marginBottom:10 }}>🏠</span>
+                <p style={{ fontSize:13, margin:0 }}>Vacío — los artículos comprados<br/>aparecerán aquí automáticamente</p>
+              </div>
+            ) : (
+              pantry.slice().reverse().map(pItem => (
+                <div key={pItem.id}
+                  style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px', borderRadius:7 }}>
+                  <span style={{ flex:1, fontSize:13, fontWeight:500, color:'#374151', minWidth:0,
+                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pItem.name}</span>
+                  {pItem.note && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{pItem.note}</span>}
+                  {pItem.source === 'shop' ? (
+                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 4px 2px 6px', borderRadius:6, flexShrink:0,
+                      background:'#dcfce7', color:'#16a34a', display:'flex', alignItems:'center', gap:2 }}>
+                      🛒 compra
+                      <button onClick={() => onReturnToShop(pItem)}
+                        title="Volver a la lista de la compra"
+                        style={{ border:'none', background:'none', cursor:'pointer', padding:'0 2px',
+                          color:'#16a34a', fontSize:11, lineHeight:1, display:'flex', alignItems:'center' }}>
+                        ↩
+                      </button>
+                    </span>
+                  ) : (
+                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:6, flexShrink:0,
+                      background:'#f3f4f6', color:'#6b7280' }}>➕ manual</span>
+                  )}
+                  <button onClick={() => onRemoveFromPantry(pItem.id)}
+                    style={{ border:'none', background:'#fee2e2', color:'#ef4444', borderRadius:6,
+                      width:28, height:28, cursor:'pointer', display:'flex', alignItems:'center',
+                      justifyContent:'center', flexShrink:0 }}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -770,22 +1016,42 @@ function ShoppingList({ items, checked, onToggle, onClearChecked, weekKey }) {
 }
 
 // ── RecipeDrawer ──────────────────────────────────────────────────
-function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose, onToggleFav, onViewRecipe, freq }) {
+function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose, onToggleFav, onViewRecipe, freq, onCreateWithAI }) {
   const slotInfo = SLOTS.find(s => s.key === slot.slotKey);
   const allRecipes = [COMER_FUERA, ...recipes];
   const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
+
+  // Match by name OR ingredients
+  const matchesSearch = (r) => {
+    if (!q) return true;
+    if (r.name.toLowerCase().includes(q)) return true;
+    return (r.ingredients||[]).some(ing => ing.name.toLowerCase().includes(q));
+  };
+
   const filtered = useMemo(() => {
     let list = allRecipes.filter(r => r.id === '__fuera__' || (r.slots||[]).includes(slot.slotKey));
     if (filter === 'fav') list = list.filter(r => r.favorite);
     if (filter === 'new') list = list.filter(r => r.isNew);
-    if (search.trim()) list = list.filter(r => r.name.toLowerCase().includes(search.toLowerCase()));
+    if (q) list = list.filter(matchesSearch);
     return list;
-  }, [recipes, slot.slotKey, filter, search]);
+  }, [recipes, slot.slotKey, filter, q]);
+
+  // Cross-slot fallback: when searching and no results in this slot, search all slots
+  const crossSlot = useMemo(() => {
+    if (!q || filtered.length > 0) return [];
+    let list = allRecipes.filter(r => r.id !== '__fuera__' && !(r.slots||[]).includes(slot.slotKey));
+    if (filter === 'fav') list = list.filter(r => r.favorite);
+    if (filter === 'new') list = list.filter(r => r.isNew);
+    return list.filter(matchesSearch);
+  }, [recipes, slot.slotKey, filter, q, filtered.length]);
+
+  const totalResults = filtered.length + crossSlot.length;
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:20, display:'flex', flexDirection:'column', justifyContent:'flex-end', backdropFilter:'blur(2px)' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end', alignItems:'center', backdropFilter:'blur(2px)' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0',
+      <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:560,
         boxShadow:'0 -4px 32px rgba(0,0,0,0.18)', maxHeight:'84vh', display:'flex', flexDirection:'column' }}>
         <div style={{ padding:'16px 20px 12px', borderBottom:'1px solid #ebebeb', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
           <div>
@@ -793,7 +1059,7 @@ function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose
               {slotInfo.emoji} {slotInfo.label} — <span style={{ color:'#f59e0b' }}>{slot.day}</span>
             </div>
             <div style={{ fontSize:11, color:'#9ca3af', marginTop:2 }}>
-              {search ? `${filtered.length} resultados` : `${filtered.length} opciones para este slot`}
+              {q ? `${totalResults} resultado${totalResults !== 1 ? 's' : ''}` : `${filtered.length} opciones para este slot`}
             </div>
           </div>
           <button onClick={onClose} style={{ border:'none', background:'none', cursor:'pointer', padding:8, borderRadius:10, color:'#9ca3af' }}>
@@ -802,7 +1068,7 @@ function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose
         </div>
         <div style={{ padding:'10px 16px 0', background:'white' }}>
           <input value={search} onChange={e=>setSearch(e.target.value)}
-            placeholder="🔍 Buscar receta..."
+            placeholder="🔍 Buscar por nombre o ingrediente..."
             style={{ width:'100%', fontSize:13, padding:'8px 12px', border:'1px solid #ebebeb', borderRadius:8,
               outline:'none', color:'#333333', background:'#fafafa', boxSizing:'border-box', marginBottom:10 }} />
         </div>
@@ -816,17 +1082,57 @@ function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose
           ))}
         </div>
         <div style={{ overflowY:'auto', flex:1, padding:16 }}>
-          {filtered.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'40px 0', color:'#d1d5db', fontSize:13 }}>No hay recetas en esta categoría</div>
+          {filtered.length === 0 && crossSlot.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'32px 0', color:'#d1d5db', fontSize:13 }}>
+              <div style={{ fontSize:28, marginBottom:8 }}>🍽️</div>
+              <p>No hay recetas con ese criterio</p>
+              {onCreateWithAI && (
+                <button onClick={() => { onClose(); onCreateWithAI(search.trim() || ''); }}
+                  style={{ marginTop:14, padding:'10px 20px', borderRadius:10, fontSize:13, fontWeight:700, border:'none',
+                    background:'linear-gradient(135deg,#7c3aed,#a855f7)', color:'white', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }}>
+                  ✨ Crear "{search.trim() || 'nueva receta'}" con IA
+                </button>
+              )}
+            </div>
           ) : (
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-              {filtered.map(r => (
-                <RecipeCard key={r.id} recipe={r}
-                  onSelect={() => onSelect(r.id)}
-                  onToggleFav={() => onToggleFav(r.id)}
-                  onViewRecipe={() => onViewRecipe(r)}
-                  freq={freq?.[r.id] || 0} />
-              ))}
+            <>
+              {filtered.length > 0 && (
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                  {filtered.map(r => (
+                    <RecipeCard key={r.id} recipe={r}
+                      onSelect={() => onSelect(r.id)}
+                      onToggleFav={() => onToggleFav(r.id)}
+                      onViewRecipe={() => onViewRecipe(r)}
+                      freq={freq?.[r.id] || 0} />
+                  ))}
+                </div>
+              )}
+              {crossSlot.length > 0 && (
+                <>
+                  <div style={{ fontSize:11, fontWeight:700, color:'#9ca3af', letterSpacing:'0.08em', textTransform:'uppercase',
+                    padding:'14px 0 8px', marginTop: filtered.length > 0 ? 16 : 0, borderTop: filtered.length > 0 ? '1px solid #f3f4f6' : 'none' }}>
+                    También en otros momentos del día
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    {crossSlot.map(r => (
+                      <RecipeCard key={r.id} recipe={r}
+                        onSelect={() => onSelect(r.id)}
+                        onToggleFav={() => onToggleFav(r.id)}
+                        onViewRecipe={() => onViewRecipe(r)}
+                        freq={freq?.[r.id] || 0} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+          {onCreateWithAI && totalResults > 0 && (
+            <div style={{ textAlign:'center', paddingTop:16, marginTop:8, borderTop:'1px solid #f3f4f6' }}>
+              <button onClick={() => { onClose(); onCreateWithAI(search.trim() || ''); }}
+                style={{ padding:'8px 18px', borderRadius:10, fontSize:12, fontWeight:600, border:'1px dashed #c4b5fd',
+                  background:'#faf5ff', color:'#7c3aed', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:5 }}>
+                ✨ {search.trim() ? `Crear "${search.trim()}" con IA` : 'Crear nueva receta con IA'}
+              </button>
             </div>
           )}
         </div>
@@ -856,7 +1162,7 @@ function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit, weekContext
   const addIng = () => setLocalIngs(prev => [...prev, { name:'', amount:'', _id: Date.now() }]);
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:30, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.5)' }} onClick={onClose} />
       <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:520, boxShadow:'0 -8px 40px rgba(0,0,0,0.2)', overflow:'hidden' }}>
         <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid #ebebeb' }}>
@@ -990,90 +1296,77 @@ const BLANK_RECIPE = () => ({
   steps:[''],
 });
 
-function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
+function RecipeEditor({ recipe, onSave, onSaveAsNew, onSaveToRecipeList, onDelete, onClose, isOverride, initialAiQuery }) {
   const isNew = !recipe && !isOverride;
   const [form, setForm] = useState(() => recipe
     ? { ...recipe, ingredients: recipe.ingredients.map((i,idx)=>({...i,_id:idx})), steps:[...recipe.steps] }
     : BLANK_RECIPE()
   );
-  const [importUrl, setImportUrl] = useState('');
-  const [importing, setImporting] = useState(false); // 'fetch' | 'ai' | false
-  const [generating, setGenerating] = useState(false);
-  const [generateName, setGenerateName] = useState('');
+  const [smartInput, setSmartInput] = useState(initialAiQuery || '');
+  const [aiStatus, setAiStatus] = useState(null); // null | 'fetch' | 'ai' | 'generating'
 
-  const handleGenerate = async () => {
-    const q = generateName.trim() || form.name.trim();
-    if (!q) { alert('Escribe primero el nombre del plato'); return; }
-    setGenerating(true);
-    try {
-      const res = await fetch('/api/generate-recipe', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: q }),
-        signal: AbortSignal.timeout(25000),
-      });
-      if (!res.ok) throw new Error('api_error');
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setForm(prev => ({
-        ...prev,
-        name: data.name || prev.name,
-        time: data.time || prev.time,
-        difficulty: data.difficulty || prev.difficulty,
-        type: data.type || prev.type,
-        slots: data.slots?.length ? data.slots : prev.slots,
-        ingredients: data.ingredients,
-        steps: data.steps,
-      }));
-      setGenerateName('');
-    } catch {
-      alert('No se pudo generar la receta. Comprueba que GEMINI_API_KEY está configurada en Vercel.');
-    } finally {
-      setGenerating(false);
-    }
-  };
+  // Auto-trigger generation when opened with an initial query
+  useEffect(() => {
+    if (initialAiQuery) handleSmartInput(initialAiQuery);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleImportUrl = async () => {
-    if (!importUrl.trim()) return;
-    setImporting('fetch');
-    try {
-      const data = await importRecipeFromUrl(importUrl.trim());
-
-      // ── Step 2: normalise with AI ────────────────────────────────
-      setImporting('ai');
-      let ingredients = data.ingredients;
-      let steps = data.steps;
+  const handleSmartInput = async (overrideVal) => {
+    const val = (typeof overrideVal === 'string' ? overrideVal : smartInput).trim() || form.name.trim();
+    if (!val) { alert('Escribe una URL, el nombre del plato o una descripción'); return; }
+    const isUrl = /^https?:\/\//i.test(val);
+    if (isUrl) {
+      setAiStatus('fetch');
       try {
-        const aiRes = await fetch('/api/normalize-recipe', {
+        const data = await importRecipeFromUrl(val);
+        setAiStatus('ai');
+        let ingredients = data.ingredients;
+        let steps = data.steps;
+        try {
+          const aiRes = await fetch('/api/normalize-recipe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: data.name, ingredients, steps }),
+            signal: AbortSignal.timeout(20000),
+          });
+          if (aiRes.ok) {
+            const normalized = await aiRes.json();
+            if (normalized.ingredients?.length) ingredients = normalized.ingredients.map((i, idx) => ({ ...i, _id: idx }));
+            if (normalized.steps?.length) steps = normalized.steps;
+          }
+        } catch {}
+        setForm(prev => ({ ...prev, name: data.name || prev.name, time: data.time || prev.time, ingredients: normalizeIngredients(ingredients), steps }));
+        setSmartInput('');
+      } catch (e) {
+        alert(e.message === 'no_recipe'
+          ? 'La web no tiene datos de receta estructurados.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net'
+          : 'No se pudo obtener la receta. Comprueba que la URL es correcta.');
+      } finally { setAiStatus(null); }
+    } else {
+      setAiStatus('generating');
+      try {
+        const res = await fetch('/api/generate-recipe', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: data.name, ingredients, steps }),
-          signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({ name: val }),
+          signal: AbortSignal.timeout(25000),
         });
-        if (aiRes.ok) {
-          const normalized = await aiRes.json();
-          if (normalized.ingredients?.length) {
-            ingredients = normalized.ingredients.map((i, idx) => ({ ...i, _id: idx }));
-          }
-          if (normalized.steps?.length) steps = normalized.steps;
-        }
-      } catch {} // AI failure is silent — use raw data
-
-      setForm(prev => ({
-        ...prev,
-        name: data.name || prev.name,
-        time: data.time || prev.time,
-        ingredients,
-        steps,
-      }));
-      setImportUrl('');
-    } catch (e) {
-      const msg = e.message === 'no_recipe'
-        ? 'La web no tiene datos de receta estructurados.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net, cookpad.com'
-        : 'No se pudo obtener la receta. Comprueba que la URL es correcta.\n\nFuncionan bien: allrecipes.com, bbcgoodfood.com, directoalpaladar.es, recetasgratis.net';
-      alert(msg);
-    } finally {
-      setImporting(false);
+        if (!res.ok) throw new Error('api_error');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        setForm(prev => ({
+          ...prev,
+          name: data.name || prev.name,
+          time: data.time || prev.time,
+          difficulty: data.difficulty || prev.difficulty,
+          type: data.type || prev.type,
+          slots: data.slots?.length ? data.slots : prev.slots,
+          ingredients: normalizeIngredients(data.ingredients),
+          steps: data.steps,
+        }));
+        setSmartInput('');
+      } catch {
+        alert('No se pudo generar la receta. Comprueba que GEMINI_API_KEY está configurada en Vercel.');
+      } finally { setAiStatus(null); }
     }
   };
 
@@ -1092,19 +1385,34 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
   const remStep = (idx)      => setForm(p => ({ ...p, steps: p.steps.filter((_,i)=>i!==idx) }));
   const addStep = ()         => setForm(p => ({ ...p, steps: [...p.steps, ''] }));
 
+  const cleanIngredients = () => form.ingredients.map(({ _id, ...r }) => ({ ...r, amount: normalizeAmount(r.amount) }));
+
   const handleSave = () => {
     if (!form.name.trim()) { alert('Ponle un nombre a la receta'); return; }
     if (form.ingredients.some(i=>!i.name.trim())) { alert('Rellena el nombre de todos los ingredientes'); return; }
+    if (!isOverride && form.steps.some(s=>!s.trim())) { alert('Rellena todos los pasos'); return; }
+    onSave({ ...form, ingredients: cleanIngredients() });
+  };
+
+  const handleSaveAsNew = () => {
+    if (!form.name.trim()) { alert('Ponle un nombre a la receta'); return; }
+    if (form.ingredients.some(i=>!i.name.trim())) { alert('Rellena el nombre de todos los ingredientes'); return; }
     if (form.steps.some(s=>!s.trim())) { alert('Rellena todos los pasos'); return; }
-    const clean = { ...form, ingredients: form.ingredients.map(({_id,...r})=>r) };
-    onSave(clean);
+    onSaveAsNew({ ...form, ingredients: cleanIngredients() });
+  };
+
+  const handleSaveToRecipeList = () => {
+    if (!form.name.trim()) { alert('Ponle un nombre a la receta'); return; }
+    if (form.ingredients.some(i=>!i.name.trim())) { alert('Rellena el nombre de todos los ingredientes'); return; }
+    if (form.steps.some(s=>!s.trim())) { alert('Rellena todos los pasos'); return; }
+    onSaveToRecipeList({ ...form, ingredients: cleanIngredients() });
   };
 
   const inputStyle = { width:'100%', fontSize:13, padding:'8px 10px', border:'1px solid #e0e0e0', borderRadius:6, outline:'none', color:'#333333', background:'white' };
   const labelStyle = { fontSize:10, fontWeight:700, color:'#9ca3af', letterSpacing:'0.08em', textTransform:'uppercase', display:'block', marginBottom:5 };
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:40, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)' }} onClick={onClose} />
       <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:540,
         boxShadow:'0 -8px 40px rgba(0,0,0,0.25)', display:'flex', flexDirection:'column', maxHeight:'92vh' }}>
@@ -1123,60 +1431,30 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
               Solo los ingredientes afectan a la lista de la compra de esta semana.
             </div>
           )}
-          {/* ── Generar con IA ── */}
+          {/* ── Input inteligente: URL o texto → IA ── */}
           {isNew && (
-            <div style={{ marginBottom:12, padding:12, background:'#faf5ff', borderRadius:12, border:'1px solid #e9d5ff' }}>
-              <label style={{ ...labelStyle, color:'#7c3aed' }}>✨ Generar receta con IA</label>
+            <div style={{ marginBottom:16, padding:12, background:'#faf5ff', borderRadius:12, border:'1px solid #e9d5ff' }}>
+              <label style={{ ...labelStyle, color:'#7c3aed' }}>✨ Generar o importar con IA</label>
               <div style={{ display:'flex', gap:6 }}>
-                <input value={generateName} onChange={e => setGenerateName(e.target.value)}
-                  placeholder={form.name || 'Ej: Paella valenciana, Lentejas con chorizo…'}
-                  onKeyDown={e => e.key === 'Enter' && handleGenerate()}
-                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#d8b4fe' }} />
-                <button onClick={handleGenerate} disabled={generating}
-                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
-                    background: generating ? '#d8b4fe' : '#7c3aed',
+                <textarea value={smartInput} onChange={e => setSmartInput(e.target.value)}
+                  rows={2}
+                  placeholder={'URL de la receta, nombre del plato o descripción…\nEj: "Lentejas con chorizo y verduras" o https://allrecipes.com/…'}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSmartInput(); } }}
+                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#d8b4fe', resize:'none', lineHeight:1.5, background:'white', color:'#333333' }} />
+                <button onClick={handleSmartInput} disabled={!!aiStatus}
+                  style={{ padding:'8px 14px', borderRadius:10, border:'none',
+                    background: aiStatus ? '#d8b4fe' : '#7c3aed',
                     color:'white', fontSize:12, fontWeight:700,
-                    cursor: generating ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-                  {generating ? '✨ Generando…' : '✨ Generar'}
+                    cursor: aiStatus ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap', alignSelf:'stretch' }}>
+                  {aiStatus === 'fetch' ? '⏳ Descargando…'
+                    : aiStatus === 'ai' ? '✨ Mejorando…'
+                    : aiStatus === 'generating' ? '✨ Generando…'
+                    : '✨ Generar'}
                 </button>
               </div>
-              <div style={{ fontSize:10, color:'#7c3aed', marginTop:5 }}>
-                {generating
-                  ? 'La IA está creando ingredientes y pasos…'
-                  : 'Escribe el nombre del plato y la IA rellena todo el formulario'}
+              <div style={{ fontSize:10, color:'#9ca3af', marginTop:5 }}>
+                {aiStatus ? 'La IA está procesando…' : 'Pega una URL o describe el plato — la IA rellena todo el formulario'}
               </div>
-            </div>
-          )}
-
-          {/* ── Importar desde URL ── */}
-          {isNew && (
-            <div style={{ marginBottom:16, padding:12, background:'#f0fdf4', borderRadius:12, border:'1px solid #bbf7d0' }}>
-              <label style={{ ...labelStyle, color:'#15803d' }}>🔗 Importar desde URL (opcional)</label>
-              <div style={{ display:'flex', gap:6 }}>
-                <input value={importUrl} onChange={e=>setImportUrl(e.target.value)}
-                  placeholder="https://www.allrecipes.com/recipe/..."
-                  onKeyDown={e => e.key === 'Enter' && handleImportUrl()}
-                  style={{ ...inputStyle, flex:1, fontSize:12, borderColor:'#86efac' }} />
-                <button onClick={handleImportUrl} disabled={!!importing || !importUrl.trim()}
-                  style={{ padding:'8px 14px', borderRadius:999, border:'none',
-                    background: importing ? '#86efac' : '#16a34a',
-                    color:'white', fontSize:12, fontWeight:700,
-                    cursor: importing ? 'default' : 'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-                  {importing === 'fetch' ? '⏳ Descargando…'
-                    : importing === 'ai' ? '✨ Mejorando…'
-                    : '↓ Importar'}
-                </button>
-              </div>
-              {importing === 'ai' && (
-                <div style={{ fontSize:10, color:'#15803d', marginTop:5, fontWeight:600 }}>
-                  ✨ Normalizando ingredientes y pasos con IA…
-                </div>
-              )}
-              {!importing && (
-                <div style={{ fontSize:10, color:'#16a34a', marginTop:5 }}>
-                  Pega un enlace de AllRecipes, BBC Good Food, Recetas.com… la IA normaliza el resultado
-                </div>
-              )}
             </div>
           )}
           <div style={{ marginBottom:16 }}>
@@ -1237,7 +1515,9 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
             {form.ingredients.map(ing => (
               <div key={ing._id} style={{ display:'flex', gap:6, marginBottom:7, alignItems:'center' }}>
                 <input value={ing.name} onChange={e=>updIng(ing._id,'name',e.target.value)} placeholder="Ingrediente" style={{ ...inputStyle, flex:2 }} />
-                <input value={ing.amount} onChange={e=>updIng(ing._id,'amount',e.target.value)} placeholder="Cantidad" style={{ ...inputStyle, flex:1 }} />
+                <input value={ing.amount} onChange={e=>updIng(ing._id,'amount',e.target.value)}
+                  onBlur={e=>updIng(ing._id,'amount',normalizeAmount(e.target.value))}
+                  placeholder="200 g / 2 ud" style={{ ...inputStyle, flex:1 }} />
                 <button onClick={()=>remIng(ing._id)} disabled={form.ingredients.length===1}
                   style={{ border:'none', background: form.ingredients.length===1 ? '#f9fafb' : '#fee2e2',
                     color: form.ingredients.length===1 ? '#d1d5db' : '#ef4444',
@@ -1272,20 +1552,34 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
             </button>
           </div>
         </div>
-        <div style={{ padding:'14px 20px', borderTop:'1px solid #ebebeb', display:'flex', gap:10, flexShrink:0, background:'white' }}>
-          {!isNew && (
-            <button onClick={()=>{ if(window.confirm('¿Eliminar esta receta?')) onDelete(form.id); }}
-              style={{ padding:'10px 16px', borderRadius:10, fontSize:13, border:'none', background:'#fee2e2', color:'#ef4444', cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
-              <Trash2 size={14}/> Eliminar
+        <div style={{ padding:'14px 20px', borderTop:'1px solid #ebebeb', flexShrink:0, background:'white' }}>
+          {onSaveAsNew && (
+            <button onClick={handleSaveAsNew}
+              style={{ width:'100%', marginBottom:8, padding:'10px', borderRadius:10, fontSize:13, border:'1px solid #d1fae5', background:'#ecfdf5', color:'#065f46', cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+              <Save size={13}/> Guardar como nueva receta
             </button>
           )}
-          <button onClick={onClose} style={{ flex:1, padding:'10px', borderRadius:8, fontSize:13, border:'1px solid #ebebeb', background:'white', color:'#888888', cursor:'pointer', fontWeight:600 }}>
-            Cancelar
-          </button>
-          <button onClick={handleSave}
-            style={{ flex:2, padding:'10px', borderRadius:10, fontSize:13, border:'none', background:'#f59e0b', color:'white', cursor:'pointer', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-            <Save size={14}/> {isNew ? 'Crear receta' : isOverride ? 'Guardar para esta semana' : 'Guardar cambios'}
-          </button>
+          {onSaveToRecipeList && (
+            <button onClick={handleSaveToRecipeList}
+              style={{ width:'100%', marginBottom:8, padding:'10px', borderRadius:10, fontSize:13, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1d4ed8', cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+              <Save size={13}/> Guardar también en el listado de recetas
+            </button>
+          )}
+          <div style={{ display:'flex', gap:10 }}>
+            {!isNew && !isOverride && (
+              <button onClick={()=>{ if(window.confirm('¿Eliminar esta receta?')) onDelete(form.id); }}
+                style={{ padding:'10px 16px', borderRadius:10, fontSize:13, border:'none', background:'#fee2e2', color:'#ef4444', cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                <Trash2 size={14}/> Eliminar
+              </button>
+            )}
+            <button onClick={onClose} style={{ flex:1, padding:'10px', borderRadius:8, fontSize:13, border:'1px solid #ebebeb', background:'white', color:'#888888', cursor:'pointer', fontWeight:600 }}>
+              Cancelar
+            </button>
+            <button onClick={handleSave}
+              style={{ flex:2, padding:'10px', borderRadius:10, fontSize:13, border:'none', background:'#f59e0b', color:'white', cursor:'pointer', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+              <Save size={14}/> {isNew ? 'Crear receta' : isOverride ? 'Guardar para esta semana' : 'Guardar cambios'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1293,17 +1587,24 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
 }
 
 // ── RecipeManager ─────────────────────────────────────────────────
-function RecipeManager({ recipes, onEdit, onNew, onToggleFav }) {
+function RecipeManager({ recipes, onEdit, onNew, onToggleFav, onCreateWithAI }) {
   const [search, setSearch]       = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [slotFilter, setSlotFilter] = useState('all');
 
-  const filtered = useMemo(() => recipes.filter(r => {
-    if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (typeFilter !== 'all' && r.type !== typeFilter) return false;
-    if (slotFilter !== 'all' && !(r.slots||[]).includes(slotFilter)) return false;
-    return true;
-  }), [recipes, search, typeFilter, slotFilter]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return recipes.filter(r => {
+      if (q) {
+        const byName = r.name.toLowerCase().includes(q);
+        const byIng  = (r.ingredients||[]).some(ing => ing.name.toLowerCase().includes(q));
+        if (!byName && !byIng) return false;
+      }
+      if (typeFilter !== 'all' && r.type !== typeFilter) return false;
+      if (slotFilter !== 'all' && !(r.slots||[]).includes(slotFilter)) return false;
+      return true;
+    });
+  }, [recipes, search, typeFilter, slotFilter]);
 
   const userRecipes    = filtered.filter(r => r.id.startsWith('usr_'));
   const defaultRecipes = filtered.filter(r => !r.id.startsWith('usr_'));
@@ -1347,7 +1648,7 @@ function RecipeManager({ recipes, onEdit, onNew, onToggleFav }) {
     <div style={{ maxWidth:960, margin:'0 auto', padding:16 }}>
       <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar receta..."
-          style={{ flex:1, minWidth:160, fontSize:13, padding:'8px 12px', border:'1px solid #e0e0e0', borderRadius:8, outline:'none', color:'#333333' }}/>
+          style={{ flex:1, minWidth:160, fontSize:13, padding:'8px 12px', border:'1px solid #e0e0e0', borderRadius:8, outline:'none', color:'#333333', background:'white' }}/>
         <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}
           style={{ fontSize:12, padding:'8px 10px', border:'1px solid #e0e0e0', borderRadius:8, outline:'none', color:'#666666', background:'white' }}>
           <option value="all">Todos los tipos</option>
@@ -1362,11 +1663,25 @@ function RecipeManager({ recipes, onEdit, onNew, onToggleFav }) {
           style={{ padding:'8px 16px', borderRadius:10, fontSize:13, fontWeight:700, border:'none', background:'#f59e0b', color:'white', cursor:'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
           <Plus size={14}/> Nueva receta
         </button>
+        {onCreateWithAI && (
+          <button onClick={() => onCreateWithAI(search.trim() || '')}
+            style={{ padding:'8px 16px', borderRadius:10, fontSize:13, fontWeight:700, border:'none',
+              background:'linear-gradient(135deg,#7c3aed,#a855f7)', color:'white', cursor:'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+            ✨ IA
+          </button>
+        )}
       </div>
       {filtered.length === 0 ? (
         <div style={{ textAlign:'center', padding:'48px 0', color:'#d1d5db' }}>
           <div style={{ fontSize:32, marginBottom:8 }}>🍽️</div>
           <p style={{ fontSize:14 }}>No hay recetas con ese filtro</p>
+          {onCreateWithAI && (
+            <button onClick={() => onCreateWithAI(search.trim() || '')}
+              style={{ marginTop:14, padding:'10px 20px', borderRadius:10, fontSize:13, fontWeight:700, border:'none',
+                background:'linear-gradient(135deg,#7c3aed,#a855f7)', color:'white', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }}>
+              ✨ Crear "{search.trim() || 'nueva receta'}" con IA
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -1518,11 +1833,14 @@ export default function App() {
   const [recipes, setRecipes] = useState(() => migrateRecipes(loadLS(SKEY+'_recipes', RECIPES_BASE)));
   const [history, setHistory]           = useState(() => loadLS(SKEY+'_history', {}));
   const [checked, setChecked]           = useState(() => new Set(loadLS(SKEY+'_checked', [])));
+  const [pantry, setPantry]             = useState(() => loadLS(SKEY+'_pantry', []));
+  const [shopNotes, setShopNotes]       = useState(() => loadLS(SKEY+'_shopnotes', {}));
   const [weekKey, setWeekKey]           = useState(() => getWeekKey(new Date()));
   const [activeSlot, setActiveSlot]     = useState(null);
   const [recipeModal, setRecipeModal]   = useState(null);
   const [recipeModalCtx, setRecipeModalCtx] = useState(null); // {day, slotKey} when opened from board
   const [recipeEditor, setRecipeEditor] = useState(null); // null=cerrado, false=nueva, obj=editar
+  const [recipeEditorAiQuery, setRecipeEditorAiQuery] = useState(null); // string query to auto-generate on open
   const [overrideCtx, setOverrideCtx]   = useState(null); // {day, slotKey, recipeId} when editing override
   const [mobileTab, setMobileTab]       = useState('board');
   const [drawerFilter, setDrawerFilter] = useState('all');
@@ -1541,13 +1859,14 @@ export default function App() {
       dbLoad('recipes'),
       dbLoad('history'),
       dbLoad('checked'),
-    ]).then(([dbRecipes, dbHistory, dbChecked]) => {
+      dbLoad('pantry'),
+      dbLoad('shopnotes'),
+    ]).then(([dbRecipes, dbHistory, dbChecked, dbPantry, dbShopNotes]) => {
       if (dbRecipes) {
         const migrated = migrateRecipes(dbRecipes);
         setRecipes(migrated);
         saveLS(SKEY+'_recipes', migrated);
       } else {
-        // Supabase vacío: migrar datos de localStorage a Supabase
         setRecipes(prev => { dbSave('recipes', prev); return prev; });
       }
       if (dbHistory) {
@@ -1561,6 +1880,18 @@ export default function App() {
         saveLS(SKEY+'_checked', dbChecked);
       } else {
         setChecked(prev => { dbSave('checked', [...prev]); return prev; });
+      }
+      if (dbPantry) {
+        setPantry(dbPantry);
+        saveLS(SKEY+'_pantry', dbPantry);
+      } else {
+        setPantry(prev => { dbSave('pantry', prev); return prev; });
+      }
+      if (dbShopNotes) {
+        setShopNotes(dbShopNotes);
+        saveLS(SKEY+'_shopnotes', dbShopNotes);
+      } else {
+        setShopNotes(prev => { dbSave('shopnotes', prev); return prev; });
       }
     }).catch(() => {}).finally(() => {
       setDbSyncing(false);
@@ -1591,6 +1922,16 @@ export default function App() {
   useEffect(() => {
     dbSave('history', history);
   }, [history]);
+
+  useEffect(() => {
+    saveLS(SKEY+'_pantry', pantry);
+    dbSave('pantry', pantry);
+  }, [pantry]);
+
+  useEffect(() => {
+    saveLS(SKEY+'_shopnotes', shopNotes);
+    dbSave('shopnotes', shopNotes);
+  }, [shopNotes]);
 
   useEffect(() => {
     if (recipeModal) {
@@ -1680,7 +2021,15 @@ export default function App() {
       ...prev,
       _overrides: {
         ...(prev._overrides || {}),
-        [`${day}_${slotKey}`]: { recipeId, ingredients: modifiedRecipe.ingredients },
+        [`${day}_${slotKey}`]: {
+          recipeId,
+          name: modifiedRecipe.name,
+          ingredients: modifiedRecipe.ingredients,
+          time: modifiedRecipe.time,
+          steps: modifiedRecipe.steps,
+          type: modifiedRecipe.type,
+          difficulty: modifiedRecipe.difficulty,
+        },
       },
     }));
     setOverrideCtx(null);
@@ -1692,6 +2041,13 @@ export default function App() {
       const exists = prev.find(r => r.id === recipe.id);
       return exists ? prev.map(r => r.id === recipe.id ? recipe : r) : [...prev, recipe];
     });
+    setRecipeEditor(null);
+  };
+
+  const handleSaveAsNewRecipe = (recipe) => {
+    const newId = 'u' + Date.now();
+    const newRecipe = { ...recipe, id: newId, isNew: true };
+    setRecipes(prev => [...prev, newRecipe]);
     setRecipeEditor(null);
   };
 
@@ -1709,6 +2065,52 @@ export default function App() {
     });
     setRecipeEditor(null);
     // dbSave for history triggered by the useEffect above
+  };
+
+  const handleCreateWithAI = (query) => {
+    setActiveSlot(null); // close drawer if open
+    setRecipeEditorAiQuery(query || '');
+    setRecipeEditor(false); // open as new recipe
+  };
+
+  const handleShopToggle = (k, item) => {
+    const isChecking = !checked.has(k);
+    setChecked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+    if (isChecking && item) {
+      const note = shopNotes[k] || item.amount;
+      setPantry(prev => {
+        const exists = prev.find(p => p.name.toLowerCase() === k);
+        if (exists) return prev.map(p => p.name.toLowerCase() === k ? { ...p, note, source: 'shop', addedAt: new Date().toISOString() } : p);
+        return [...prev, { id: Date.now() + '_' + k, name: item.name, note, source: 'shop', addedAt: new Date().toISOString() }];
+      });
+    }
+  };
+
+  const handleUpdateShopNote = (k, note) => {
+    setShopNotes(prev => note ? { ...prev, [k]: note } : Object.fromEntries(Object.entries(prev).filter(([key]) => key !== k)));
+  };
+
+  const handleAddToPantry = ({ name, note, source }) => {
+    setPantry(prev => {
+      const key = name.trim().toLowerCase();
+      const exists = prev.find(p => p.name.toLowerCase() === key);
+      if (exists) return prev.map(p => p.name.toLowerCase() === key ? { ...p, note: note || p.note, addedAt: new Date().toISOString() } : p);
+      return [...prev, { id: Date.now() + '_' + key, name: name.trim(), note: note || '', source, addedAt: new Date().toISOString() }];
+    });
+  };
+
+  const handleRemoveFromPantry = (id) => {
+    setPantry(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleClearShopChecked = () => {
+    setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; });
+  };
+
+  const handleReturnToShop = (pItem) => {
+    const k = pItem.name.trim().toLowerCase();
+    setChecked(p => { const n = new Set(p); n.delete(k); return n; });
+    setPantry(prev => prev.filter(p => p.id !== pItem.id));
   };
 
   const TABS = [
@@ -1778,6 +2180,7 @@ export default function App() {
           <RecipeManager recipes={recipes}
             onEdit={r => setRecipeEditor(r)}
             onNew={() => setRecipeEditor(false)}
+            onCreateWithAI={handleCreateWithAI}
             onToggleFav={id => setRecipes(p => p.map(r => r.id === id ? { ...r, favorite:!r.favorite } : r))} />
         </div>
       )}
@@ -1790,12 +2193,25 @@ export default function App() {
         </div>
       )}
 
-      {/* MAIN: PIZARRA + LISTA */}
-      {mobileTab !== 'recipes' && (
+      {/* TAB: COMPRA — pantalla completa */}
+      {mobileTab === 'shop' && (
+        <div className="shop-full-page">
+          <ShopPage
+            shoppingList={shoppingList} checked={checked}
+            onToggle={handleShopToggle}
+            onClearChecked={handleClearShopChecked}
+            weekKey={weekKey}
+            shopNotes={shopNotes} onUpdateNote={handleUpdateShopNote}
+            pantry={pantry} onAddToPantry={handleAddToPantry} onRemoveFromPantry={handleRemoveFromPantry} onReturnToShop={handleReturnToShop} />
+        </div>
+      )}
+
+      {/* MAIN: PIZARRA */}
+      {mobileTab !== 'recipes' && mobileTab !== 'shop' && (
         <div className="main-layout">
 
           {/* PIZARRA */}
-          <div className={`board-area ${mobileTab === 'shop' ? 'hidden-mobile' : ''}`}>
+          <div className="board-area">
 
             {/* ── MÓVIL: selector de días + vista de un día ── */}
             <div className="mobile-board">
@@ -1842,6 +2258,7 @@ export default function App() {
                     <PostItSlot slotKey={key}
                       menuVal={menu[selectedDay]?.[key]} recipes={recipes}
                       hasOverride={menu._overrides?.[`${selectedDay}_${key}`]?.recipeId === menu[selectedDay]?.[key]}
+                      overrideName={menu._overrides?.[`${selectedDay}_${key}`]?.recipeId === menu[selectedDay]?.[key] ? menu._overrides?.[`${selectedDay}_${key}`]?.name : null}
                       onSlotClick={() => { setDrawerFilter('all'); setActiveSlot({ day:selectedDay, slotKey:key }); }}
                       onRemove={() => setMenu(p => ({ ...p, [selectedDay]:{ ...p[selectedDay], [key]:null } }))}
                       onViewRecipe={(rid, sk) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: selectedDay, slotKey: sk }); } }} />
@@ -1862,18 +2279,16 @@ export default function App() {
                   ))}
                 </div>
               )}
-              <div style={{ overflowX:'auto', paddingBottom:8, WebkitOverflowScrolling:'touch' }}>
-                <div style={{ display:'flex', gap:10, minWidth:'max-content' }}>
-                  {DAYS.map((day, di) => (
-                    <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
-                      menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
-                      recipes={recipes}
-                      overrides={menu._overrides}
-                      onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
-                      onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
-                      onViewRecipe={(rid, sk, d) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: d, slotKey: sk }); } }} />
-                  ))}
-                </div>
+              <div style={{ display:'flex', gap:10 }}>
+                {DAYS.map((day, di) => (
+                  <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
+                    menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
+                    recipes={recipes}
+                    overrides={menu._overrides}
+                    onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
+                    onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
+                    onViewRecipe={(rid, sk, d) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: d, slotKey: sk }); } }} />
+                ))}
               </div>
             </div>
 
@@ -1882,14 +2297,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* LISTA COMPRA — solo en tab 'shop' */}
-          {mobileTab === 'shop' && (
-            <div className="shopping-sidebar" id="sidebar-shopping">
-              <ShoppingList items={shoppingList} checked={checked} weekKey={weekKey}
-                onToggle={k => setChecked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-                onClearChecked={() => setChecked(p => { const n = new Set(p); shoppingList.filter(i => p.has(i.k)).forEach(i => n.delete(i.k)); return n; })} />
-            </div>
-          )}
         </div>
       )}
 
@@ -1928,7 +2335,8 @@ export default function App() {
           onSelect={rid => { setMenu(p => ({ ...p, [activeSlot.day]:{ ...p[activeSlot.day], [activeSlot.slotKey]:rid } })); setActiveSlot(null); }}
           onClose={() => setActiveSlot(null)}
           onToggleFav={id => setRecipes(p => p.map(r => r.id === id ? { ...r, favorite:!r.favorite } : r))}
-          onViewRecipe={setRecipeModal} />
+          onViewRecipe={setRecipeModal}
+          onCreateWithAI={handleCreateWithAI} />
       )}
 
       {/* MODAL RECETA */}
@@ -1939,8 +2347,21 @@ export default function App() {
           weekContext={recipeModalCtx}
           onEditWeek={(r, ctx) => {
             setRecipeModal(null);
+            const ovKey = `${ctx.day}_${ctx.slotKey}`;
+            const existing = menu._overrides?.[ovKey];
+            const recipeToEdit = (existing?.recipeId === r.id && existing.ingredients?.length)
+              ? {
+                  ...r,
+                  name: existing.name || r.name,
+                  ingredients: existing.ingredients,
+                  time: existing.time || r.time,
+                  steps: existing.steps || r.steps,
+                  type: existing.type || r.type,
+                  difficulty: existing.difficulty || r.difficulty,
+                }
+              : r;
             setOverrideCtx({ day: ctx.day, slotKey: ctx.slotKey, recipeId: r.id });
-            setRecipeEditor(r);
+            setRecipeEditor(recipeToEdit);
           }} />
       )}
 
@@ -1949,9 +2370,12 @@ export default function App() {
         <RecipeEditor
           recipe={recipeEditor || null}
           isOverride={!!overrideCtx}
+          initialAiQuery={recipeEditorAiQuery}
           onSave={overrideCtx ? handleSaveOverride : handleSaveRecipe}
+          onSaveAsNew={(!overrideCtx && recipeEditor) ? handleSaveAsNewRecipe : null}
+          onSaveToRecipeList={overrideCtx ? handleSaveRecipe : null}
           onDelete={overrideCtx ? null : handleDeleteRecipe}
-          onClose={() => { setRecipeEditor(null); setOverrideCtx(null); }} />
+          onClose={() => { setRecipeEditor(null); setOverrideCtx(null); setRecipeEditorAiQuery(null); }} />
       )}
 
       <style>{`
@@ -1975,7 +2399,7 @@ export default function App() {
           box-shadow: 0 1px 0 rgba(0,0,0,0.06), 0 2px 12px rgba(0,0,0,0.04);
           position: sticky; top: 0; z-index: 50;
         }
-        .header-inner { max-width: 1300px; margin: 0 auto; padding: 14px 20px; }
+        .header-inner { max-width: 1700px; margin: 0 auto; padding: 14px 20px; }
         .header-row1 { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
         .header-brand { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
         .header-logo {
@@ -2029,9 +2453,9 @@ export default function App() {
         .btn-clear-week:hover { background: #fef2f2; }
 
         /* ── Layout ────────────────────────────────── */
-        .tab-content { padding-bottom: 80px; }
+        .tab-content { padding-bottom: 80px; max-width: 1700px; margin: 0 auto; width: 100%; }
         .main-layout {
-          max-width: 1300px; margin: 0 auto; padding: 20px;
+          max-width: 1700px; margin: 0 auto; padding: 20px;
           display: flex; gap: 20px; align-items: flex-start;
           padding-bottom: 80px;
         }
@@ -2042,8 +2466,48 @@ export default function App() {
           position: sticky; top: 90px;
         }
 
+        /* ── ShopPage ───────────────────────────────── */
+        .shop-full-page {
+          max-width: 1700px; margin: 0 auto; padding: 20px 20px 80px;
+          height: calc(100vh - 130px); display: flex; flex-direction: column;
+        }
+        .shop-page {
+          flex: 1; display: flex; flex-direction: column; min-height: 0;
+          background: white; border-radius: 14px; border: 1px solid #ebebeb;
+          overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .shop-subtabs {
+          display: flex; border-bottom: 2px solid #f3f4f6; flex-shrink: 0; background: white;
+        }
+        .shop-subtab {
+          flex: 1; padding: 13px 16px; border: none; background: transparent;
+          font-size: 13px; font-weight: 600; color: #9ca3af; cursor: pointer;
+          display: flex; align-items: center; justify-content: center; gap: 7px;
+          border-bottom: 2px solid transparent; margin-bottom: -2px;
+          transition: color 0.15s;
+        }
+        .shop-subtab.active { color: #f59e0b; border-bottom-color: #f59e0b; }
+        .shop-subtab:hover:not(.active) { color: #6b7280; background: #fafafa; }
+        .shop-subtab-badge {
+          background: #fef3c7; color: #92400e;
+          font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 99px;
+        }
+        .shop-panels {
+          flex: 1; display: flex; min-height: 0; overflow: hidden;
+        }
+        .shop-panel {
+          flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+        }
+        .shop-panel-right { border-left: 1px solid #f3f4f6; }
+        .shop-hidden-mobile { display: none !important; }
+        @media (min-width: 768px) {
+          .shop-hidden-mobile { display: flex !important; }
+          .shop-full-page { height: calc(100vh - 110px); }
+          .shop-subtabs { display: none; }
+        }
+
         /* ── DayColumn ─────────────────────────────── */
-        .day-column { width: 162px; flex-shrink: 0; }
+        .day-column { flex: 1; min-width: 120px; }
         .day-header {
           text-align: center; margin-bottom: 12px;
           padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;
@@ -2197,7 +2661,7 @@ export default function App() {
 
           /* Main layout adjusts */
           .main-layout { padding: 12px 12px 80px; gap: 12px; }
-          .tab-content { padding-bottom: 80px; }
+          .tab-content { padding-bottom: 80px; max-width: 1700px; margin: 0 auto; width: 100%; }
 
           /* Shopping sidebar full width on mobile */
           .shopping-sidebar { width: 100%; position: static; }

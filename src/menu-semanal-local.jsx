@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.13.2';
+const APP_VERSION = '1.13.3';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -2171,18 +2171,16 @@ export default function App() {
                   ))}
                 </div>
               )}
-              <div style={{ overflowX:'auto', paddingBottom:8, WebkitOverflowScrolling:'touch' }}>
-                <div style={{ display:'flex', gap:10, minWidth:'max-content' }}>
-                  {DAYS.map((day, di) => (
-                    <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
-                      menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
-                      recipes={recipes}
-                      overrides={menu._overrides}
-                      onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
-                      onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
-                      onViewRecipe={(rid, sk, d) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: d, slotKey: sk }); } }} />
-                  ))}
-                </div>
+              <div style={{ display:'flex', gap:10 }}>
+                {DAYS.map((day, di) => (
+                  <DayColumn key={day} day={day} dayShort={DAYS_SHORT[di]}
+                    menuDay={menu[day] || { primero:null, segundo:null, cena:null }}
+                    recipes={recipes}
+                    overrides={menu._overrides}
+                    onSlotClick={(d, sk) => { setDrawerFilter('all'); setActiveSlot({ day:d, slotKey:sk }); }}
+                    onRemoveSlot={(d, sk) => setMenu(p => ({ ...p, [d]:{ ...p[d], [sk]:null } }))}
+                    onViewRecipe={(rid, sk, d) => { const r = rid === '__fuera__' ? null : recipes.find(x => x.id === rid); if(r) { setRecipeModal(r); setRecipeModalCtx({ day: d, slotKey: sk }); } }} />
+                ))}
               </div>
             </div>
 
@@ -2399,7 +2397,7 @@ export default function App() {
         }
 
         /* ── DayColumn ─────────────────────────────── */
-        .day-column { width: 162px; flex-shrink: 0; }
+        .day-column { flex: 1; min-width: 120px; }
         .day-header {
           text-align: center; margin-bottom: 12px;
           padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;

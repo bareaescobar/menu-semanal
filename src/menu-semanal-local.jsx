@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.14.1';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -984,9 +984,9 @@ function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose
   }, [recipes, slot.slotKey, filter, search]);
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end', backdropFilter:'blur(2px)' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end', alignItems:'center', backdropFilter:'blur(2px)' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0',
+      <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:560,
         boxShadow:'0 -4px 32px rgba(0,0,0,0.18)', maxHeight:'84vh', display:'flex', flexDirection:'column' }}>
         <div style={{ padding:'16px 20px 12px', borderBottom:'1px solid #ebebeb', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
           <div>

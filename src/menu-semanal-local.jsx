@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.14.2';
+const APP_VERSION = '1.14.3';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -709,7 +709,7 @@ function RecipeCard({ recipe, onSelect, onToggleFav, onViewRecipe, freq }) {
 }
 
 // ── ShopPage ─────────────────────────────────────────────────────
-function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry, onReturnToShop }) {
+function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry, onReturnToShop, onCreateWithAI }) {
   const [subTab,     setSubTab]     = useState('list');
   const [newName,    setNewName]    = useState('');
   const [newNote,    setNewNote]    = useState('');
@@ -859,6 +859,22 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
               </button>
             </div>
           </div>
+          {/* Botón generar receta con despensa */}
+          {pantry.length > 0 && onCreateWithAI && (
+            <div style={{ padding:'8px 12px', borderBottom:'1px solid #f3f4f6', flexShrink:0 }}>
+              <button
+                onClick={() => {
+                  const names = pantry.map(p => p.name).join(', ');
+                  onCreateWithAI(`Receta usando ingredientes que tengo en casa: ${names}`);
+                }}
+                style={{ width:'100%', padding:'9px 14px', borderRadius:10, border:'none',
+                  background:'linear-gradient(135deg,#7c3aed,#a855f7)', color:'white',
+                  fontWeight:700, fontSize:12, cursor:'pointer',
+                  display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                ✨ Generar receta con lo que tengo ({pantry.length} ingrediente{pantry.length !== 1 ? 's' : ''})
+              </button>
+            </div>
+          )}
           {/* Lista despensa */}
           <div style={{ overflowY:'auto', flex:1, padding:'4px 4px 80px' }}>
             {pantry.length === 0 ? (
@@ -2202,7 +2218,8 @@ export default function App() {
             onClearChecked={handleClearShopChecked}
             weekKey={weekKey}
             shopNotes={shopNotes} onUpdateNote={handleUpdateShopNote}
-            pantry={pantry} onAddToPantry={handleAddToPantry} onRemoveFromPantry={handleRemoveFromPantry} onReturnToShop={handleReturnToShop} />
+            pantry={pantry} onAddToPantry={handleAddToPantry} onRemoveFromPantry={handleRemoveFromPantry} onReturnToShop={handleReturnToShop}
+            onCreateWithAI={handleCreateWithAI} />
         </div>
       )}
 

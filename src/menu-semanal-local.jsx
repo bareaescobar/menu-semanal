@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.11.0';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -783,7 +783,7 @@ function RecipeDrawer({ slot, recipes, filter, onFilterChange, onSelect, onClose
   }, [recipes, slot.slotKey, filter, search]);
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:20, display:'flex', flexDirection:'column', justifyContent:'flex-end', backdropFilter:'blur(2px)' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end', backdropFilter:'blur(2px)' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)' }} onClick={onClose} />
       <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0',
         boxShadow:'0 -4px 32px rgba(0,0,0,0.18)', maxHeight:'84vh', display:'flex', flexDirection:'column' }}>
@@ -856,7 +856,7 @@ function RecipeModal({ recipe, onClose, onUpdateIngredients, onEdit, weekContext
   const addIng = () => setLocalIngs(prev => [...prev, { name:'', amount:'', _id: Date.now() }]);
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:30, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.5)' }} onClick={onClose} />
       <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:520, boxShadow:'0 -8px 40px rgba(0,0,0,0.2)', overflow:'hidden' }}>
         <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid #ebebeb' }}>
@@ -990,7 +990,7 @@ const BLANK_RECIPE = () => ({
   steps:[''],
 });
 
-function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
+function RecipeEditor({ recipe, onSave, onSaveAsNew, onDelete, onClose, isOverride }) {
   const isNew = !recipe && !isOverride;
   const [form, setForm] = useState(() => recipe
     ? { ...recipe, ingredients: recipe.ingredients.map((i,idx)=>({...i,_id:idx})), steps:[...recipe.steps] }
@@ -1095,16 +1095,24 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
   const handleSave = () => {
     if (!form.name.trim()) { alert('Ponle un nombre a la receta'); return; }
     if (form.ingredients.some(i=>!i.name.trim())) { alert('Rellena el nombre de todos los ingredientes'); return; }
-    if (form.steps.some(s=>!s.trim())) { alert('Rellena todos los pasos'); return; }
+    if (!isOverride && form.steps.some(s=>!s.trim())) { alert('Rellena todos los pasos'); return; }
     const clean = { ...form, ingredients: form.ingredients.map(({_id,...r})=>r) };
     onSave(clean);
+  };
+
+  const handleSaveAsNew = () => {
+    if (!form.name.trim()) { alert('Ponle un nombre a la receta'); return; }
+    if (form.ingredients.some(i=>!i.name.trim())) { alert('Rellena el nombre de todos los ingredientes'); return; }
+    if (form.steps.some(s=>!s.trim())) { alert('Rellena todos los pasos'); return; }
+    const clean = { ...form, ingredients: form.ingredients.map(({_id,...r})=>r) };
+    onSaveAsNew(clean);
   };
 
   const inputStyle = { width:'100%', fontSize:13, padding:'8px 10px', border:'1px solid #e0e0e0', borderRadius:6, outline:'none', color:'#333333', background:'white' };
   const labelStyle = { fontSize:10, fontWeight:700, color:'#9ca3af', letterSpacing:'0.08em', textTransform:'uppercase', display:'block', marginBottom:5 };
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:40, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)' }} onClick={onClose} />
       <div style={{ position:'relative', background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:540,
         boxShadow:'0 -8px 40px rgba(0,0,0,0.25)', display:'flex', flexDirection:'column', maxHeight:'92vh' }}>
@@ -1272,20 +1280,28 @@ function RecipeEditor({ recipe, onSave, onDelete, onClose, isOverride }) {
             </button>
           </div>
         </div>
-        <div style={{ padding:'14px 20px', borderTop:'1px solid #ebebeb', display:'flex', gap:10, flexShrink:0, background:'white' }}>
-          {!isNew && (
-            <button onClick={()=>{ if(window.confirm('¿Eliminar esta receta?')) onDelete(form.id); }}
-              style={{ padding:'10px 16px', borderRadius:10, fontSize:13, border:'none', background:'#fee2e2', color:'#ef4444', cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
-              <Trash2 size={14}/> Eliminar
+        <div style={{ padding:'14px 20px', borderTop:'1px solid #ebebeb', flexShrink:0, background:'white' }}>
+          {onSaveAsNew && (
+            <button onClick={handleSaveAsNew}
+              style={{ width:'100%', marginBottom:8, padding:'10px', borderRadius:10, fontSize:13, border:'1px solid #d1fae5', background:'#ecfdf5', color:'#065f46', cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+              <Save size={13}/> Guardar como nueva receta
             </button>
           )}
-          <button onClick={onClose} style={{ flex:1, padding:'10px', borderRadius:8, fontSize:13, border:'1px solid #ebebeb', background:'white', color:'#888888', cursor:'pointer', fontWeight:600 }}>
-            Cancelar
-          </button>
-          <button onClick={handleSave}
-            style={{ flex:2, padding:'10px', borderRadius:10, fontSize:13, border:'none', background:'#f59e0b', color:'white', cursor:'pointer', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-            <Save size={14}/> {isNew ? 'Crear receta' : isOverride ? 'Guardar para esta semana' : 'Guardar cambios'}
-          </button>
+          <div style={{ display:'flex', gap:10 }}>
+            {!isNew && !isOverride && (
+              <button onClick={()=>{ if(window.confirm('¿Eliminar esta receta?')) onDelete(form.id); }}
+                style={{ padding:'10px 16px', borderRadius:10, fontSize:13, border:'none', background:'#fee2e2', color:'#ef4444', cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                <Trash2 size={14}/> Eliminar
+              </button>
+            )}
+            <button onClick={onClose} style={{ flex:1, padding:'10px', borderRadius:8, fontSize:13, border:'1px solid #ebebeb', background:'white', color:'#888888', cursor:'pointer', fontWeight:600 }}>
+              Cancelar
+            </button>
+            <button onClick={handleSave}
+              style={{ flex:2, padding:'10px', borderRadius:10, fontSize:13, border:'none', background:'#f59e0b', color:'white', cursor:'pointer', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+              <Save size={14}/> {isNew ? 'Crear receta' : isOverride ? 'Guardar para esta semana' : 'Guardar cambios'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1695,6 +1711,13 @@ export default function App() {
     setRecipeEditor(null);
   };
 
+  const handleSaveAsNewRecipe = (recipe) => {
+    const newId = 'u' + Date.now();
+    const newRecipe = { ...recipe, id: newId, isNew: true };
+    setRecipes(prev => [...prev, newRecipe]);
+    setRecipeEditor(null);
+  };
+
   const handleDeleteRecipe = (id) => {
     setRecipes(prev => prev.filter(r => r.id !== id));
     setHistory(prev => {
@@ -1939,8 +1962,13 @@ export default function App() {
           weekContext={recipeModalCtx}
           onEditWeek={(r, ctx) => {
             setRecipeModal(null);
+            const ovKey = `${ctx.day}_${ctx.slotKey}`;
+            const existing = menu._overrides?.[ovKey];
+            const recipeToEdit = (existing?.recipeId === r.id && existing.ingredients?.length)
+              ? { ...r, ingredients: existing.ingredients }
+              : r;
             setOverrideCtx({ day: ctx.day, slotKey: ctx.slotKey, recipeId: r.id });
-            setRecipeEditor(r);
+            setRecipeEditor(recipeToEdit);
           }} />
       )}
 
@@ -1950,6 +1978,7 @@ export default function App() {
           recipe={recipeEditor || null}
           isOverride={!!overrideCtx}
           onSave={overrideCtx ? handleSaveOverride : handleSaveRecipe}
+          onSaveAsNew={(!overrideCtx && recipeEditor) ? handleSaveAsNewRecipe : null}
           onDelete={overrideCtx ? null : handleDeleteRecipe}
           onClose={() => { setRecipeEditor(null); setOverrideCtx(null); }} />
       )}

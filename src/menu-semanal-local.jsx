@@ -188,7 +188,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.13.0';
+const APP_VERSION = '1.13.1';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -693,34 +693,33 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
     const note = shopNotes[item.k];
     const isEd = editingKey === item.k;
     return (
-      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:8 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px', borderRadius:7 }}>
         <div onClick={() => onToggle(item.k, item)}
-          style={{ width:20, height:20, borderRadius:5, flexShrink:0, display:'flex', alignItems:'center',
+          style={{ width:18, height:18, borderRadius:4, flexShrink:0, display:'flex', alignItems:'center',
             justifyContent:'center', cursor:'pointer',
             background: crossed ? '#22c55e' : 'transparent',
             border: crossed ? '2px solid #22c55e' : '2px solid #d1d5db' }}>
-          {crossed && <Check size={11} strokeWidth={3} color="white" />}
+          {crossed && <Check size={10} strokeWidth={3} color="white" />}
         </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:13, fontWeight:500, color: crossed ? '#9ca3af' : '#374151',
-            textDecoration: crossed ? 'line-through' : 'none' }}>{item.name}</div>
-          <div style={{ fontSize:10, color:'#c0c0c0' }}>{item.amount}</div>
-        </div>
+        <span style={{ flex:1, fontSize:13, fontWeight:500, color: crossed ? '#9ca3af' : '#374151',
+          textDecoration: crossed ? 'line-through' : 'none', minWidth:0, overflow:'hidden',
+          textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</span>
+        <span style={{ fontSize:11, color:'#c0c0c0', flexShrink:0 }}>{item.amount}</span>
         {!crossed && (isEd
           ? <input value={editVal} onChange={e => setEditVal(e.target.value)}
               onBlur={commitEdit}
               onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingKey(null); }}
               autoFocus placeholder="ej: 2 latas"
-              style={{ width:90, fontSize:12, padding:'4px 7px', border:'1.5px solid #f59e0b',
-                borderRadius:6, outline:'none', color:'#92400e', background:'#fffbeb' }} />
+              style={{ width:85, fontSize:11, padding:'3px 6px', border:'1.5px solid #f59e0b',
+                borderRadius:5, outline:'none', color:'#92400e', background:'#fffbeb', flexShrink:0 }} />
           : <button onClick={() => startEdit(item.k)}
-              style={{ fontSize:11, fontWeight:600, cursor:'pointer', padding:'3px 8px', borderRadius:6,
+              style={{ fontSize:10, fontWeight:600, cursor:'pointer', padding:'2px 7px', borderRadius:5,
                 border:'none', whiteSpace:'nowrap', flexShrink:0,
-                background: note ? '#fef3c7' : '#f3f4f6', color: note ? '#92400e' : '#9ca3af' }}>
+                background: note ? '#fef3c7' : '#f3f4f6', color: note ? '#92400e' : '#b0b0b0' }}>
               {note || '+ nota'}
             </button>
         )}
-        {crossed && note && <span style={{ fontSize:11, color:'#b0b0b0', flexShrink:0 }}>{note}</span>}
+        {crossed && note && <span style={{ fontSize:10, color:'#b0b0b0', flexShrink:0 }}>{note}</span>}
       </div>
     );
   };
@@ -768,9 +767,9 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
             ) : (
               <>
                 {Object.values(grouped).map(({ cat, items: si }) => (
-                  <div key={cat.label} style={{ marginBottom:8 }}>
-                    <div style={{ background:cat.color, borderRadius:8, padding:'5px 10px', margin:'0 6px 2px' }}>
-                      <span style={{ fontSize:11, fontWeight:700, color:cat.textColor }}>{cat.label}</span>
+                  <div key={cat.label} style={{ marginBottom:4 }}>
+                    <div style={{ background:cat.color, borderRadius:6, padding:'3px 10px', margin:'4px 6px 1px' }}>
+                      <span style={{ fontSize:10, fontWeight:700, color:cat.textColor }}>{cat.label}</span>
                     </div>
                     {si.map(item => <ShopRow key={item.k} item={item} crossed={false} />)}
                   </div>
@@ -2293,7 +2292,7 @@ export default function App() {
           box-shadow: 0 1px 0 rgba(0,0,0,0.06), 0 2px 12px rgba(0,0,0,0.04);
           position: sticky; top: 0; z-index: 50;
         }
-        .header-inner { max-width: 1300px; margin: 0 auto; padding: 14px 20px; }
+        .header-inner { max-width: 1700px; margin: 0 auto; padding: 14px 20px; }
         .header-row1 { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
         .header-brand { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
         .header-logo {
@@ -2347,9 +2346,9 @@ export default function App() {
         .btn-clear-week:hover { background: #fef2f2; }
 
         /* ── Layout ────────────────────────────────── */
-        .tab-content { padding-bottom: 80px; }
+        .tab-content { padding-bottom: 80px; max-width: 1700px; margin: 0 auto; width: 100%; }
         .main-layout {
-          max-width: 1300px; margin: 0 auto; padding: 20px;
+          max-width: 1700px; margin: 0 auto; padding: 20px;
           display: flex; gap: 20px; align-items: flex-start;
           padding-bottom: 80px;
         }
@@ -2362,7 +2361,7 @@ export default function App() {
 
         /* ── ShopPage ───────────────────────────────── */
         .shop-full-page {
-          max-width: 900px; margin: 0 auto; padding: 20px 20px 80px;
+          max-width: 1700px; margin: 0 auto; padding: 20px 20px 80px;
           height: calc(100vh - 130px); display: flex; flex-direction: column;
         }
         .shop-page {
@@ -2555,7 +2554,7 @@ export default function App() {
 
           /* Main layout adjusts */
           .main-layout { padding: 12px 12px 80px; gap: 12px; }
-          .tab-content { padding-bottom: 80px; }
+          .tab-content { padding-bottom: 80px; max-width: 1700px; margin: 0 auto; width: 100%; }
 
           /* Shopping sidebar full width on mobile */
           .shopping-sidebar { width: 100%; position: static; }

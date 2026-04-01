@@ -378,11 +378,16 @@ function saveLS(key, value) {
 }
 // Migrar recetas del formato antiguo (slot:string) al nuevo (slots:array)
 function migrateRecipes(recipes) {
-  return recipes.map(r => {
+  // Fix legacy slot format
+  const fixed = recipes.map(r => {
     if (!r.slots && r.slot) return { ...r, slots: [r.slot] };
     if (!r.slots)            return { ...r, slots: ['segundo'] };
     return r;
   });
+  // Merge in any base recipes that aren't in the saved list yet
+  const savedIds = new Set(fixed.map(r => r.id));
+  const missing = RECIPES_BASE.filter(r => !savedIds.has(r.id));
+  return missing.length > 0 ? [...fixed, ...missing] : fixed;
 }
 
 // ── Hook responsive ───────────────────────────────────────────────

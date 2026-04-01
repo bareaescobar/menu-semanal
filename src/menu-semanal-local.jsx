@@ -776,7 +776,7 @@ function PostItSlot({ slotKey, menuVal, recipes, onSlotClick, onRemove, onViewRe
 
 // ── DayColumn ─────────────────────────────────────────────────────
 function DayColumn({ day, dayShort, menuDay, recipes, overrides, onSlotClick, onRemoveSlot, onViewRecipe }) {
-  const filledCount = SLOTS.filter(({key}) => menuDay[key]).length;
+  const filledCount = SLOTS.filter(({key}) => { const rid = menuDay[key]; return rid && (rid === '__fuera__' || recipes.some(r => r.id === rid)); }).length;
   return (
     <div className="day-column">
       <div className="day-header">
@@ -870,20 +870,23 @@ function RecipeCard({ recipe, onSelect, onToggleFav, onViewRecipe, freq }) {
 }
 
 // ── ShopPage ─────────────────────────────────────────────────────
-function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry, onReturnToShop, onCreateWithAI }) {
-  const [subTab,     setSubTab]     = useState('list');
-  const [newName,    setNewName]    = useState('');
-  const [newNote,    setNewNote]    = useState('');
-  const [editingKey, setEditingKey] = useState(null);
-  const [editVal,    setEditVal]    = useState('');
-  const [copied,     setCopied]     = useState(false);
+function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, shopNotes, onUpdateNote, pantry, onAddToPantry, onRemoveFromPantry, onReturnToShop, onCreateWithAI, onUpdatePantryNote }) {
+  const [subTab,         setSubTab]         = useState('list');
+  const [newName,        setNewName]        = useState('');
+  const [newNote,        setNewNote]        = useState('');
+  const [editingKey,     setEditingKey]     = useState(null);
+  const [editVal,        setEditVal]        = useState('');
+  const [editPantryId,   setEditPantryId]   = useState(null);
+  const [editPantryVal,  setEditPantryVal]  = useState('');
+  const [copied,         setCopied]         = useState(false);
 
-  const pending = shoppingList.filter(i => !checked.has(i.k));
-  const done    = shoppingList.filter(i =>  checked.has(i.k));
+  const sortedList = [...shoppingList].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  const pending = sortedList.filter(i => !checked.has(i.k));
+  const done    = sortedList.filter(i =>  checked.has(i.k));
   const grouped = pending.reduce((acc, item) => {
     const cat = categorizeIngredient(item.name);
     if (!acc[cat.label]) acc[cat.label] = { cat, items: [] };
-    acc[cat.label].items.push(item);
+    acc[cat.label].items.push(item); // already sorted
     return acc;
   }, {});
 
@@ -1044,35 +1047,49 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
                 <p style={{ fontSize:13, margin:0 }}>Vacío — los artículos comprados<br/>aparecerán aquí automáticamente</p>
               </div>
             ) : (
-              pantry.slice().reverse().map(pItem => (
-                <div key={pItem.id}
-                  style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px', borderRadius:7 }}>
-                  <span style={{ flex:1, fontSize:13, fontWeight:500, color:'#374151', minWidth:0,
-                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pItem.name}</span>
-                  {pItem.note && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{pItem.note}</span>}
-                  {pItem.source === 'shop' ? (
-                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 4px 2px 6px', borderRadius:6, flexShrink:0,
-                      background:'#dcfce7', color:'#16a34a', display:'flex', alignItems:'center', gap:2 }}>
-                      🛒 compra
-                      <button onClick={() => onReturnToShop(pItem)}
-                        title="Volver a la lista de la compra"
-                        style={{ border:'none', background:'none', cursor:'pointer', padding:'0 2px',
-                          color:'#16a34a', fontSize:11, lineHeight:1, display:'flex', alignItems:'center' }}>
-                        ↩
+              [...pantry].sort((a, b) => a.name.localeCompare(b.name, 'es')).map(pItem => {
+                const isEditingPantry = editPantryId === pItem.id;
+                return (
+                  <div key={pItem.id}
+                    style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 10px', borderRadius:7 }}>
+                    <span style={{ flex:1, fontSize:13, fontWeight:500, color:'#374151', minWidth:0,
+                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pItem.name}</span>
+                    {isEditingPantry ? (
+                      <input autoFocus value={editPantryVal}
+                        onChange={e => setEditPantryVal(e.target.value)}
+                        onBlur={() => { onUpdatePantryNote(pItem.id, editPantryVal.trim()); setEditPantryId(null); }}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { onUpdatePantryNote(pItem.id, editPantryVal.trim()); setEditPantryId(null); } }}
+                        style={{ width:80, fontSize:11, padding:'3px 6px', border:'1.5px solid #f59e0b',
+                          borderRadius:5, outline:'none', color:'#92400e', background:'#fffbeb', flexShrink:0 }} />
+                    ) : (
+                      <button onClick={() => { setEditPantryId(pItem.id); setEditPantryVal(pItem.note || ''); }}
+                        style={{ fontSize:10, fontWeight:600, cursor:'pointer', padding:'2px 7px', borderRadius:5,
+                          border:'none', whiteSpace:'nowrap', flexShrink:0,
+                          background: pItem.note ? '#fef3c7' : '#f3f4f6', color: pItem.note ? '#92400e' : '#b0b0b0' }}>
+                        {pItem.note || '+ cantidad'}
                       </button>
-                    </span>
-                  ) : (
-                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:6, flexShrink:0,
-                      background:'#f3f4f6', color:'#6b7280' }}>➕ manual</span>
-                  )}
-                  <button onClick={() => onRemoveFromPantry(pItem.id)}
-                    style={{ border:'none', background:'#fee2e2', color:'#ef4444', borderRadius:6,
-                      width:28, height:28, cursor:'pointer', display:'flex', alignItems:'center',
-                      justifyContent:'center', flexShrink:0 }}>
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))
+                    )}
+                    {pItem.source === 'shop' ? (
+                      <span style={{ fontSize:10, fontWeight:700, padding:'2px 4px 2px 6px', borderRadius:6, flexShrink:0,
+                        background:'#dcfce7', color:'#16a34a', display:'flex', alignItems:'center', gap:2 }}>
+                        🛒
+                        <button onClick={() => onReturnToShop(pItem)} title="Volver a la lista de la compra"
+                          style={{ border:'none', background:'none', cursor:'pointer', padding:'0 2px',
+                            color:'#16a34a', fontSize:11, lineHeight:1, display:'flex', alignItems:'center' }}>↩</button>
+                      </span>
+                    ) : (
+                      <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:6, flexShrink:0,
+                        background:'#f3f4f6', color:'#6b7280' }}>➕</span>
+                    )}
+                    <button onClick={() => onRemoveFromPantry(pItem.id)}
+                      style={{ border:'none', background:'#fee2e2', color:'#ef4444', borderRadius:6,
+                        width:26, height:26, cursor:'pointer', display:'flex', alignItems:'center',
+                        justifyContent:'center', flexShrink:0 }}>
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -2153,7 +2170,12 @@ export default function App() {
     return Object.values(raw).map(({ name, amounts }) => ({ k: name.toLowerCase(), name, amount: mergeAmounts(amounts) }));
   }, [menu, recipes]);
 
-  const totalPlatos = DAYS.reduce((a, day) => a + SLOTS.filter(({key}) => menu[day]?.[key]).length, 0);
+  const totalPlatos = DAYS.reduce((a, day) => a + SLOTS.filter(({key}) => {
+    const rid = menu[day]?.[key];
+    if (!rid) return false;
+    if (rid === '__fuera__') return true;
+    return recipes.some(r => r.id === rid);
+  }).length, 0);
   const uncheckedCount = shoppingList.filter(i => !checked.has(i.k)).length;
 
   // ── Sugerencias inteligentes ──────────────────────────────────
@@ -2345,6 +2367,10 @@ export default function App() {
     setPantry(prev => prev.filter(p => p.id !== pItem.id));
   };
 
+  const handleUpdatePantryNote = (id, note) => {
+    setPantry(prev => prev.map(p => p.id === id ? { ...p, note } : p));
+  };
+
   const TABS = [
     { key:'board',   icon:'🗓', label:'Pizarra' },
     { key:'recipes', icon:'📖', label:'Recetas' },
@@ -2452,7 +2478,7 @@ export default function App() {
             weekKey={weekKey}
             shopNotes={shopNotes} onUpdateNote={handleUpdateShopNote}
             pantry={pantry} onAddToPantry={handleAddToPantry} onRemoveFromPantry={handleRemoveFromPantry} onReturnToShop={handleReturnToShop}
-            onCreateWithAI={handleCreateWithAI} />
+            onUpdatePantryNote={handleUpdatePantryNote} onCreateWithAI={handleCreateWithAI} />
         </div>
       )}
 
@@ -2479,7 +2505,7 @@ export default function App() {
               {/* Pills de días */}
               <div className="day-pills-row">
                 {DAYS.map((day, di) => {
-                  const filled = SLOTS.filter(({key}) => menu[day]?.[key]).length;
+                  const filled = SLOTS.filter(({key}) => { const rid = menu[day]?.[key]; return rid && (rid === '__fuera__' || recipes.some(r => r.id === rid)); }).length;
                   const isToday = di === (new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
                   return (
                     <button key={day} className={`day-pill ${selectedDay === day ? 'active' : ''} ${isToday ? 'today' : ''}`}

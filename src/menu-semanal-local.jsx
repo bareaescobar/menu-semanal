@@ -896,6 +896,10 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
     acc[cat.label].items.push(item); // already sorted
     return acc;
   }, {});
+  const groupedSorted = INGREDIENT_CATEGORIES
+    .map(c => grouped[c.label])
+    .filter(Boolean)
+    .concat(grouped['🛒 Otros'] ? [grouped['🛒 Otros']] : []);
 
   const buildText = () => {
     const lines = pending.map(i => { const n = shopNotes[i.k]; return `• ${i.name}  ${n || i.amount}`; }).join('\n');
@@ -982,7 +986,7 @@ function ShopPage({ shoppingList, checked, onToggle, onClearChecked, weekKey, sh
               </div>
             ) : (
               <>
-                {Object.values(grouped).map(({ cat, items: si }) => (
+                {groupedSorted.map(({ cat, items: si }) => (
                   <div key={cat.label} style={{ marginBottom:4 }}>
                     <div style={{ background:cat.color, borderRadius:6, padding:'3px 10px', margin:'4px 6px 1px' }}>
                       <span style={{ fontSize:10, fontWeight:700, color:cat.textColor }}>{cat.label}</span>
@@ -1111,13 +1115,17 @@ function ShoppingList({ items, checked, onToggle, onClearChecked, weekKey }) {
   const pending = items.filter(i => !checked.has(i.k));
   const done    = items.filter(i =>  checked.has(i.k));
 
-  // Agrupar pendientes por sección
+  // Agrupar pendientes por sección (orden canónico estable)
   const grouped = pending.reduce((acc, item) => {
     const cat = categorizeIngredient(item.name);
     if (!acc[cat.label]) acc[cat.label] = { cat, items: [] };
     acc[cat.label].items.push(item);
     return acc;
   }, {});
+  const groupedSorted = INGREDIENT_CATEGORIES
+    .map(c => grouped[c.label])
+    .filter(Boolean)
+    .concat(grouped['🛒 Otros'] ? [grouped['🛒 Otros']] : []);
 
   const buildText = () => {
     const header = `🛒 Lista de la compra — semana del ${weekLabel(weekKey)}\n`;
@@ -1188,7 +1196,7 @@ function ShoppingList({ items, checked, onToggle, onClearChecked, weekKey }) {
         </div>
       ) : (
         <div style={{ overflowY:'auto', maxHeight:'60vh' }}>
-          {Object.values(grouped).map(({ cat, items: sectionItems }) => (
+          {groupedSorted.map(({ cat, items: sectionItems }) => (
             <div key={cat.label} style={{ marginBottom: 10 }}>
               <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 8px 4px',
                 background: cat.color, borderRadius: 8, marginBottom: 2 }}>

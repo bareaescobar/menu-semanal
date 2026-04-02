@@ -7,17 +7,17 @@ export const supabase = createClient(
 
 /**
  * Loads a value from the app_data table by key.
- * Returns null if not found or on error.
+ * Returns { value, updatedAt } or null if not found / on error.
  */
 export async function dbLoad(key) {
   try {
     const { data, error } = await supabase
       .from('app_data')
-      .select('value')
+      .select('value, updated_at')
       .eq('key', key)
       .maybeSingle();
     if (error) throw error;
-    return data ? data.value : null;
+    return data ? { value: data.value, updatedAt: data.updated_at } : null;
   } catch (e) {
     console.error(`[supabase] dbLoad(${key}) failed:`, e.message);
     return null;
@@ -36,4 +36,27 @@ export async function dbSave(key, value) {
   } catch (e) {
     console.error(`[supabase] dbSave(${key}) failed:`, e.message);
   }
+}
+
+/**
+ * Subscribes to real-time changes in the app_data table.
+ * Calls onChange(key, value) whenever another device saves a key.
+ * Returns an unsubscribe function.
+ * NOTE: requires Realtime enabled on the app_data table in Supabase dashboard.
+ */
+export function dbSubscribe(onChange) {
+  const channel = supabase
+    .channel('app_data_realtime')
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'app_data' },
+      (payload) => {
+        if (payload.new?.key && payload.new?.value !== undefined) {
+          onChange(payload.new.key, payload.new.value, payload.new.updated_at);
+        }
+      }
+    )
+    .subscribe();
+
+  return () => supabase.removeChannel(channel);
 }

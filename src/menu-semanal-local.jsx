@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Star, ShoppingCart, X, Clock, Plus, Check, BookOpen, Pencil, Trash2, Save, Calendar, ChevronLeft, ChevronRight, Coffee, Share2, Copy, MessageCircle, Download } from "lucide-react";
-import { dbLoad, dbSave } from "./supabase";
+import { dbLoad, dbSave, dbSubscribe } from "./supabase";
 
 const DAYS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const DAYS_SHORT = ['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'];
@@ -344,7 +344,7 @@ const RECIPES_BASE = [
 ];
 
 const SKEY = 'msv1';
-const APP_VERSION = '1.14.5';
+const APP_VERSION = '1.14.6';
 const emptyMenu = () => Object.fromEntries(DAYS.map(d=>[d,{primero:null,segundo:null,cena:null}]));
 
 // ── Helpers fecha ─────────────────────────────────────────────────
@@ -375,6 +375,13 @@ function loadLS(key, fallback) {
 }
 function saveLS(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+// Timestamps por clave para detectar qué copia es más reciente (localStorage vs Supabase)
+function loadLSTimestamp(shortKey) {
+  try { return localStorage.getItem(SKEY+'_ts_'+shortKey) || null; } catch { return null; }
+}
+function saveLSTimestamp(shortKey) {
+  try { localStorage.setItem(SKEY+'_ts_'+shortKey, new Date().toISOString()); } catch {}
 }
 // Migrar recetas del formato antiguo (slot:string) al nuevo (slots:array)
 function migrateRecipes(recipes) {
@@ -2040,6 +2047,7 @@ export default function App() {
   const [drawerFilter, setDrawerFilter] = useState('all');
   const [showClear, setShowClear]       = useState(false);
   const [dbSyncing, setDbSyncing]       = useState(true);
+  const dbSynced = useRef(false); // true después de la primera carga desde Supabase
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [selectedDay, setSelectedDay]   = useState(() => {
     const jsDay = new Date().getDay();
@@ -2047,8 +2055,23 @@ export default function App() {
     return DAYS[idx];
   });
 
-  // ── Carga inicial desde Supabase ──────────────────────────────
+  // ── Carga inicial desde Supabase con resolución por timestamp ─
   useEffect(() => {
+    // Decide qué copia usar: gana la más reciente (localStorage vs Supabase)
+    function resolveKey(dbResult, lsShortKey, lsValue, applyFn) {
+      const lsTs  = loadLSTimestamp(lsShortKey);
+      const dbTs  = dbResult?.updatedAt || null;
+      const useDb = dbResult && (!lsTs || !dbTs || dbTs > lsTs);
+      if (useDb) {
+        applyFn(dbResult.value); // Supabase es más reciente
+        saveLSTimestamp(lsShortKey);
+      } else if (dbResult === null && lsValue != null) {
+        dbSave(lsShortKey, lsValue); // No había dato en Supabase → subir localStorage
+      }
+      // Si localStorage es más reciente no hacemos nada: ya está en local,
+      // y el save useEffect lo subirá a Supabase en cuanto dbSynced sea true.
+    }
+
     Promise.all([
       dbLoad('recipes'),
       dbLoad('history'),
@@ -2056,38 +2079,29 @@ export default function App() {
       dbLoad('pantry'),
       dbLoad('shopnotes'),
     ]).then(([dbRecipes, dbHistory, dbChecked, dbPantry, dbShopNotes]) => {
-      if (dbRecipes) {
-        const migrated = migrateRecipes(dbRecipes);
+      resolveKey(dbRecipes,   'recipes',  null, (v) => {
+        const migrated = migrateRecipes(v);
         setRecipes(migrated);
         saveLS(SKEY+'_recipes', migrated);
-      } else {
-        setRecipes(prev => { dbSave('recipes', prev); return prev; });
-      }
-      if (dbHistory) {
-        setHistory(dbHistory);
-        saveLS(SKEY+'_history', dbHistory);
-      } else {
-        setHistory(prev => { dbSave('history', prev); return prev; });
-      }
-      if (dbChecked) {
-        setChecked(new Set(dbChecked));
-        saveLS(SKEY+'_checked', dbChecked);
-      } else {
-        setChecked(prev => { dbSave('checked', [...prev]); return prev; });
-      }
-      if (dbPantry) {
-        setPantry(dbPantry);
-        saveLS(SKEY+'_pantry', dbPantry);
-      } else {
-        setPantry(prev => { dbSave('pantry', prev); return prev; });
-      }
-      if (dbShopNotes) {
-        setShopNotes(dbShopNotes);
-        saveLS(SKEY+'_shopnotes', dbShopNotes);
-      } else {
-        setShopNotes(prev => { dbSave('shopnotes', prev); return prev; });
-      }
+      });
+      resolveKey(dbHistory,   'history',  null, (v) => {
+        setHistory(v);
+        saveLS(SKEY+'_history', v);
+      });
+      resolveKey(dbChecked,   'checked',  null, (v) => {
+        setChecked(new Set(v));
+        saveLS(SKEY+'_checked', v);
+      });
+      resolveKey(dbPantry,    'pantry',   null, (v) => {
+        setPantry(v);
+        saveLS(SKEY+'_pantry', v);
+      });
+      resolveKey(dbShopNotes, 'shopnotes',null, (v) => {
+        setShopNotes(v);
+        saveLS(SKEY+'_shopnotes', v);
+      });
     }).catch(() => {}).finally(() => {
+      dbSynced.current = true;
       setDbSyncing(false);
     });
   }, []);
@@ -2104,26 +2118,37 @@ export default function App() {
   }, [weekKey]);
 
   useEffect(() => {
+    if (!dbSynced.current) return;
     saveLS(SKEY+'_recipes', recipes);
+    saveLSTimestamp('recipes');
     dbSave('recipes', recipes);
   }, [recipes]);
 
   useEffect(() => {
+    if (!dbSynced.current) return;
     saveLS(SKEY+'_checked', [...checked]);
+    saveLSTimestamp('checked');
     dbSave('checked', [...checked]);
   }, [checked]);
 
   useEffect(() => {
+    if (!dbSynced.current) return;
+    saveLS(SKEY+'_history', history);
+    saveLSTimestamp('history');
     dbSave('history', history);
   }, [history]);
 
   useEffect(() => {
+    if (!dbSynced.current) return;
     saveLS(SKEY+'_pantry', pantry);
+    saveLSTimestamp('pantry');
     dbSave('pantry', pantry);
   }, [pantry]);
 
   useEffect(() => {
+    if (!dbSynced.current) return;
     saveLS(SKEY+'_shopnotes', shopNotes);
+    saveLSTimestamp('shopnotes');
     dbSave('shopnotes', shopNotes);
   }, [shopNotes]);
 
@@ -2133,6 +2158,22 @@ export default function App() {
       if (updated) setRecipeModal(updated);
     }
   }, [recipes]);
+
+  // ── Sync en tiempo real: actualiza estado cuando otro dispositivo guarda ──
+  useEffect(() => {
+    const unsubscribe = dbSubscribe((key, value, updatedAt) => {
+      // Ignorar si este dispositivo fue el que guardó (el timestamp local será >= el remoto)
+      const lsTs = loadLSTimestamp(key);
+      if (lsTs && updatedAt && updatedAt <= lsTs) return;
+      // Aplicar el cambio remoto
+      if (key === 'recipes')   { const m = migrateRecipes(value); setRecipes(m); saveLS(SKEY+'_recipes', m); saveLSTimestamp('recipes'); }
+      if (key === 'history')   { setHistory(value);              saveLS(SKEY+'_history', value);   saveLSTimestamp('history'); }
+      if (key === 'checked')   { setChecked(new Set(value));     saveLS(SKEY+'_checked', value);   saveLSTimestamp('checked'); }
+      if (key === 'pantry')    { setPantry(value);               saveLS(SKEY+'_pantry', value);    saveLSTimestamp('pantry'); }
+      if (key === 'shopnotes') { setShopNotes(value);            saveLS(SKEY+'_shopnotes', value); saveLSTimestamp('shopnotes'); }
+    });
+    return unsubscribe;
+  }, []);
 
   // ── Detección de nueva versión via Service Worker ─────────────
   useEffect(() => {
@@ -2313,11 +2354,11 @@ export default function App() {
           `¿Restaurar copia del ${new Date(payload.exportedAt).toLocaleDateString('es-ES')}?\n\nEsto reemplazará todos tus datos actuales (recetas, semanas, despensa…).`
         )) return;
         const { data } = payload;
-        if (data.recipes)   { setRecipes(data.recipes);   saveLS(SKEY+'_recipes',  data.recipes);  dbSave('recipes',  data.recipes);  }
-        if (data.history)   { setHistory(data.history);   saveLS(SKEY+'_history',  data.history);  dbSave('history',  data.history);  }
-        if (data.checked)   { setChecked(new Set(data.checked)); saveLS(SKEY+'_checked', data.checked); dbSave('checked', data.checked); }
-        if (data.pantry)    { setPantry(data.pantry);     saveLS(SKEY+'_pantry',   data.pantry);   dbSave('pantry',   data.pantry);   }
-        if (data.shopnotes) { setShopNotes(data.shopnotes); saveLS(SKEY+'_shopnotes', data.shopnotes); dbSave('shopnotes', data.shopnotes); }
+        if (data.recipes)   { setRecipes(data.recipes);   saveLS(SKEY+'_recipes',  data.recipes);  saveLSTimestamp('recipes');   dbSave('recipes',  data.recipes);  }
+        if (data.history)   { setHistory(data.history);   saveLS(SKEY+'_history',  data.history);  saveLSTimestamp('history');   dbSave('history',  data.history);  }
+        if (data.checked)   { setChecked(new Set(data.checked)); saveLS(SKEY+'_checked', data.checked); saveLSTimestamp('checked');  dbSave('checked', data.checked); }
+        if (data.pantry)    { setPantry(data.pantry);     saveLS(SKEY+'_pantry',   data.pantry);   saveLSTimestamp('pantry');    dbSave('pantry',   data.pantry);   }
+        if (data.shopnotes) { setShopNotes(data.shopnotes); saveLS(SKEY+'_shopnotes', data.shopnotes); saveLSTimestamp('shopnotes'); dbSave('shopnotes', data.shopnotes); }
         setShowClear(false);
         alert('✅ Copia restaurada correctamente.');
       } catch {

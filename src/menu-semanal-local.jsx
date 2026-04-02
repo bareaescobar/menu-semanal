@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Star, ShoppingCart, X, Clock, Plus, Check, BookOpen, Pencil, Trash2, Save, Calendar, ChevronLeft, ChevronRight, Coffee, Share2, Copy, MessageCircle, Download } from "lucide-react";
-import { dbLoad, dbSave, dbSubscribe } from "./supabase";
+import { dbLoad, dbSave } from "./supabase";
 
 const DAYS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const DAYS_SHORT = ['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'];
@@ -2166,22 +2166,6 @@ export default function App() {
       if (updated) setRecipeModal(updated);
     }
   }, [recipes]);
-
-  // ── Sync en tiempo real: actualiza estado cuando otro dispositivo guarda ──
-  useEffect(() => {
-    const unsubscribe = dbSubscribe((key, value, updatedAt) => {
-      // Ignorar si este dispositivo fue el que guardó (el timestamp local será >= el remoto)
-      const lsTs = loadLSTimestamp(key);
-      if (lsTs && updatedAt && updatedAt <= lsTs) return;
-      // Aplicar el cambio remoto
-      if (key === 'recipes')   { const m = migrateRecipes(value); setRecipes(m); saveLS(SKEY+'_recipes', m); saveLSTimestamp('recipes'); }
-      if (key === 'history')   { setHistory(value);              saveLS(SKEY+'_history', value);   saveLSTimestamp('history'); }
-      if (key === 'checked')   { setChecked(new Set(value));     saveLS(SKEY+'_checked', value);   saveLSTimestamp('checked'); }
-      if (key === 'pantry')    { setPantry(value);               saveLS(SKEY+'_pantry', value);    saveLSTimestamp('pantry'); }
-      if (key === 'shopnotes') { setShopNotes(value);            saveLS(SKEY+'_shopnotes', value); saveLSTimestamp('shopnotes'); }
-    });
-    return unsubscribe;
-  }, []);
 
   // ── Detección de nueva versión via Service Worker ─────────────
   useEffect(() => {
